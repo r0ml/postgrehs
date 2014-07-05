@@ -7,7 +7,7 @@ Synopsis:       Compare two sets of Postgres schemas and show the differences
 Build-Type:     Simple
 
 Library
-  Build-Depends:  base, binary, bytestring, network, text, filepath, directory, parsec
+  Build-Depends:  preface, base, bytestring, network, parsec
   Ghc-options:    -Wall
   Hs-Source-Dirs: .
   Default-Language: Haskell2010
@@ -19,4 +19,4 @@ Executable hspg
   Hs-Source-Dirs: .
   Ghc-options: -Wall
   Default-language:   Haskell2010
-  Build-depends:      base, bytestring, network, binary, text, filepath, directory, parsec
+  Build-depends:      preface, base, bytestring, network, parsec

@@ -1,55 +1,45 @@
-{-# LANGUAGE BangPatterns, OverloadedStrings, FlexibleInstances, UndecidableInstances, FlexibleContexts, NoMonomorphismRestriction #-}
-{-# OPTIONS_GHC -funbox-strict-fields #-}
+{-# LANGUAGE OverloadedStrings #-}
 
-module MD5 (md5, md5File, stringMD5, test) where
+module MD5 (md5, md5File, stringMD5) where
 
-import qualified Data.ByteString as B (empty, concat, concatMap, index, singleton, length, pack, take, drop, cons, replicate, hGetContents)
+import Preface
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Internal as B (toForeignPtr)
+
+{-
+import qualified Data.ByteString as B (concat, concatMap, index, singleton, length, pack, take, drop, cons, replicate, hGetContents)
 import Data.ByteString.Internal (ByteString, toForeignPtr)
 import Data.Bits ((.&.), shiftR, (.|.), complement, xor, rotateL)
-import Data.List hiding ((!!))
-import Data.Word (Word8, Word32, Word64)
+import Data.List (foldl')
+import Data.Word (Word32, Word64)
 
 import Foreign.Marshal.Array (peekArray)
 import Foreign.Ptr (Ptr, plusPtr, castPtr)
 import Foreign.ForeignPtr (withForeignPtr)
 import System.IO (openFile, IOMode(ReadMode))
--- import Data.Vector.Storable (unsafeFromForeignPtr, toList)
 import System.IO.Unsafe (unsafePerformIO)
-import Debug.Trace 
-
-blockSizeBytes :: Int
-blockSizeBytes = 64 
+-}
 
 data MD5State = MD5State Word32 Word32 Word32 Word32 deriving Show
-type Digest = ByteString
+type Digest = B.ByteString
 
-md5InitialState = MD5State 0x67452301 0xEFCDAB89 0x98BADCFE 0x10325476
-
-md5 :: ByteString -> Digest
-md5 = md5Finalize . foldl' md5Update md5InitialState . blocks
-
-md5Finalize :: MD5State -> Digest
-md5Finalize (MD5State a b c d) = B.pack $ concatMap intToBytes [a,b,c,d]
-
-intToBytes :: Word32->[Word8]
-intToBytes n = map (fromIntegral . (.&. 0xff) . shiftR n) (take 4 [0,8..])
-
-longToBytes :: Word64->ByteString
-longToBytes n =  B.pack $ map (fromIntegral . (.&. 0xff) . shiftR n) (take 8 [0,8..])
-
-blocks :: ByteString -> [ByteString]
-blocks zz = blocks' zz
-  where blocks' bs = if B.length bs >= blockSizeBytes then B.take blockSizeBytes bs : blocks' ( B.drop blockSizeBytes bs) 
-  	                 else let lzp = (blockSizeBytes - 9) - B.length bs
-  	                          lzpx = if lzp < 0 then lzp+blockSizeBytes else lzp
-  	                          lm = B.concat [bs, B.singleton 0x80, B.replicate lzpx 0, longToBytes (8 * fromIntegral (B.length zz))]
-  	                       in if lzp < 0 then [ B.take blockSizeBytes lm, B.drop blockSizeBytes lm] else [lm]
-
-wordsFromBytes :: ByteString -> [Word32]
-wordsFromBytes bs = unsafePerformIO $ withForeignPtr ptr $ \p -> peekArray (len `div` 4) (castPtr (p `plusPtr` off) :: Ptr Word32) where (ptr, off, len) = toForeignPtr bs
+md5 :: B.ByteString -> Digest
+md5 arg = (md5Finalize . foldl' md5Update md5InitialState . blocks) arg
+      where md5InitialState = MD5State 0x67452301 0xEFCDAB89 0x98BADCFE 0x10325476
+            md5Finalize (MD5State a b c d) = B.pack $ concatMap intToBytes [a,b,c,d]
+            intToBytes n = map (fromIntegral . (.&. 0xff) . shiftR n) (take 4 [0,8..])
+            blocks bs = if B.length bs >= bsz then B.take bsz bs : blocks ( B.drop bsz bs) 
+                        else let lzp = (bsz - 9) - B.length bs
+                                 lzpx = if lzp < 0 then lzp+bsz else lzp
+                                 lm = B.concat [bs, B.singleton 0x80, B.replicate lzpx 0, longToBytes (8 * olen)]
+  	                         in if lzp < 0 then [ B.take bsz lm, B.drop bsz lm] else [lm]
+            bsz = 64
+            olen = fromIntegral (B.length arg)
+            longToBytes :: Word64 -> B.ByteString
+            longToBytes n =  B.pack $ map (fromIntegral . (.&. 0xff) . shiftR n) (take 8 [0,8..])
 
 -- takes 64 byte ByteString at a time.
-md5Update :: MD5State -> ByteString -> MD5State
+md5Update :: MD5State -> B.ByteString -> MD5State
 md5Update (MD5State a b c d) w =
     let ws = cycle (wordsFromBytes w)
  
@@ -65,7 +55,7 @@ md5Update (MD5State a b c d) w =
         m4 = [ 0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1
              , 0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391 ]
 
-        [z1,z2,z3,z4] = foldl ch2 [a,b,c,d] [
+        (z1,z2,z3,z4) = foldl ch2 (a,b,c,d) [
            (\x y z -> z `xor` (x .&. (y `xor` z)) , ws,                     [ 7, 12, 17, 22], m1),
            (\x y z -> y `xor` (z .&. (x `xor` y)) , everynth 4 (tail ws),   [ 5,  9, 14, 20], m2),
            (\x y z -> x `xor` y `xor` z ,           everynth 2 (drop 5 ws), [ 4, 11, 16, 23], m3),
@@ -73,24 +63,17 @@ md5Update (MD5State a b c d) w =
 
     in MD5State (z1+a) (z2+b) (z3+c) (z4+d)
     where
-      oo f !a_ !b_ !c_ !d_ !x s ac = b_ + rotateL (f b_ c_ d_ + (x + ac + a_)) s
-      ch1 fn [a,b,c,d] (w:ws) (r1:rs) (m:ms) = let r = oo fn a b c d w r1 m
-                 in r : (if null ms then [] else ch1 fn [d,r,b,c] ws rs ms )
-      ch2 a (f,w,r,m) = let [h,i,j,k] = drop 12 (ch1 f a w (cycle r) m) in [h,k,j,i]
-      everynth n (y:ys) = y: everynth n (drop n ys)
+      mch fn h i j k x s ac = i + rotateL (fn i j k + (x + ac + h)) s
+      ch1 fn (h,i,j,k) ws rs ms = let r = mch fn h i j k (head ws) (head rs) (head ms)
+                 in r : (if null (tail ms) then [] else ch1 fn (k,r,i,j) (tail ws) (tail rs) (tail ms) )
+      ch2 e (f,w1,r,m) = let [h,i,j,k] = drop 12 (ch1 f e w1 (cycle r) m) in (h,k,j,i)
+      everynth n ys = head ys : everynth n (drop (n+1) ys )
+      wordsFromBytes bs = unsafePerformIO $ withForeignPtr ptr $ \p -> peekArray (len `div` 4) (castPtr (p `plusPtr` off) :: Ptr Word32) where (ptr, off, len) = B.toForeignPtr bs
 
-showHex :: Enum a => a -> ByteString
-showHex = shex . fromEnum where shex x = B.cons (B.index chars a) (B.singleton (B.index chars b)) where { (a,b) = divMod x 16; chars = "0123456789abcdef" :: ByteString}
-
-stringMD5 :: ByteString -> ByteString
-stringMD5 x = B.concatMap showHex x
-
-test :: IO ()
-test = do 
-     putStrLn $ "Hash is:   " ++ show (stringMD5 . md5 $ B.empty )
-     putStrLn $ "Should Be: d41d8cd98f00b204e9800998ecf8427e" 
+stringMD5 :: B.ByteString -> B.ByteString
+stringMD5 = B.concatMap (shex . fromEnum)
+  where shex n = let (a,b) = divMod n 16 in B.cons (B.index chars a) (B.singleton (B.index chars b))
+        chars = "0123456789abcdef" :: B.ByteString
 
 md5File :: String -> IO ()
-md5File f = openFile f ReadMode >>= B.hGetContents >>= putStrLn . show. stringMD5 . md5
-
--- main = md5File . head =<< getArgs
+md5File f = openFile f ReadMode >>= B.hGetContents >>= print . stringMD5 . md5

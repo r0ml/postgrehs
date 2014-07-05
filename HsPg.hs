@@ -1,19 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import PostgreSQL as PG
-import Control.Monad (forever)
-import System.Environment (getArgs)
-import qualified Data.ByteString as B (pack)
-import qualified Data.Text as T (pack, unpack, singleton)
-import qualified Data.Text.Encoding as T (encodeUtf8, decodeUtf8)
-
-import Control.Concurrent (threadDelay)
+import Preface
 
 main :: IO ()
 main = do
-    args <- getArgs
+    (a1:a2:_) <- getArgs
     
-    conn <- PG.connectToDb "host=localhost port=5432 user=r0ml dbname=r0ml"
+    conn <- PG.connectToDb a1
     
 {-    
     d <- doQuery a (FunctionCall 1598 [])
@@ -22,7 +16,7 @@ main = do
     e <- sendQuery conn (Parse "stm" "select * from pg_tables where schemaname = $1" [1043])
     print e
     
-    f <- sendQuery conn (Bind "clem" "stm" [Just $ (T.encodeUtf8 . T.pack) (head args)])
+    f <- sendQuery conn (Bind "clem" "stm" [Just $ stringToByteString a2])
     print f
     
     g <- doQuery conn (Execute "clem" 3)

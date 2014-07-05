@@ -1,47 +1,59 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module PostgreSQL 
+module PostgreSQL (connectToDb, sendQuery, doQuery, getNextResult, Postgres(..), PgMessage(..), PgResult(..) )
 where
 
+import Preface
+import MD5
+
+import qualified Data.ByteString as B
+import Text.ParserCombinators.Parsec hiding ((<|>))
+
+import qualified Network.Socket.ByteString as S (recv, send)
+import qualified Network.Socket as S (sClose, Socket(..),
+   addrAddress, connect, defaultProtocol, SocketType(..), Family(..), getAddrInfo, defaultHints,
+   socket, addrSocketType, addrFamily ) 
+
+import qualified Data.ByteString.Lazy as BL (toStrict, fromChunks)
+import qualified Data.ByteString.Builder as BB
+
+{-
 import Control.Exception
-import Data.Monoid (Monoid, mappend, mempty, mconcat)
+import Data.Monoid (mappend, mempty)
 import Data.Char (ord, chr, isSpace)
-import Control.Applicative ( (<*), (<*>), (<$>), pure )
+import Control.Applicative ( (<*>), (<$>) )
 import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
-import qualified Data.ByteString.Lazy as B (toStrict, fromChunks)
+
 import qualified Data.ByteString as B
 import Data.ByteString (ByteString)
 import qualified Network.Socket.ByteString as S (recv, send)
-import qualified Network.Socket as S (accept, sClose, withSocketsDo, Socket(..),
+import qualified Network.Socket as S (sClose, Socket(..),
    addrAddress, connect, defaultProtocol, SocketType(..), Family(..), getAddrInfo, defaultHints,
    socket, addrSocketType, addrFamily ) 
-import Data.Int (Int8, Int16, Int32, Int64)
+import Data.Int (Int16, Int32)
 import Data.List (intercalate)
-import MD5
-
 import System.FilePath (combine)
 import System.Directory (getHomeDirectory)
 
-import Control.Concurrent ( forkIO, newQSem, waitQSem, signalQSem, MVar, Chan,
-    newChan, writeChan, readChan, newEmptyMVar, putMVar, takeMVar, QSem,
-    threadDelay )
-import qualified Data.Text as T (pack, unpack, singleton)
+import Control.Concurrent ( forkIO, Chan, newChan, writeChan, readChan)
+import qualified Data.Text as T (pack, unpack)
 import qualified Data.Text.Encoding as T (encodeUtf8, decodeUtf8)
 
 import qualified Data.ByteString.Builder as BB
 import Text.ParserCombinators.Parsec hiding (lookAhead)
 
 import Debug.Trace
+-}
 
 -- Copied from SCGI (could be collapsed)
 data Postgres = Postgres { pgSend :: Chan PgQuery, pgRecv :: Chan PgResult } -- , pgConnParm :: [(String,String)] }
 
 type PgQuery = PgMessage
 
-type Parameter = String -- placeholder
-type Argument = String -- placeholder
+-- type Parameter = String -- placeholder
+-- type Argument = String -- placeholder
 type DataType = Int -- placeholder
 data FieldDef = FieldDef String Int Int Int Int Int Int deriving (Show) -- placeholder
 type FieldValue = Maybe ByteString -- placeholder
@@ -96,6 +108,7 @@ data PgMessage = StartUpMessage [(String,String)]
 data PgResult =
         ResultSet (Maybe RowDescriptionT) [DataRowT] String
       | ErrorMessage [(Char, String)]
+      | EndSession
       | OtherResult [PgMessage]
 
     deriving (Show)
@@ -105,16 +118,10 @@ data PgResult =
 printMsg :: String -> IO ()
 -- printMsg a = return () 
 
-treset = "\ESC[m"
-csi args code = concat ["\ESC[", intercalate ";" (map show args), code]
-printMsg x = putStrLn (csi [38, 2, 20, 20, 20] "m" ++ x ++ treset)
+printMsg x = putStrLn (csi [38, 2, 20, 20, 20 :: Int] "m" ++ x ++ treset)
+  where treset = "\ESC[m"
+        csi args code = concat ["\ESC[", intercalate ";" (map show args), code]
   
-toString :: ByteString -> String
-toString = T.unpack . T.decodeUtf8
-
-fromString :: String -> ByteString
-fromString = T.encodeUtf8 . T.pack
-
 getFieldData :: Int -> Get (Maybe ByteString)
 getFieldData _n = do
   a <- getInt32
@@ -124,7 +131,7 @@ getFieldData _n = do
     
 
 getUntil :: Word8 -> Get ByteString
-getUntil c = fmap (B.toStrict  . BB.toLazyByteString) (getUntil' c mempty)
+getUntil c = fmap (BL.toStrict  . BB.toLazyByteString) (getUntil' c mempty)
   where getUntil' cx a = do
           n <- getWord8
           if n == cx then return a else getUntil' cx (a `mappend` BB.word8 n)
@@ -132,16 +139,14 @@ getUntil c = fmap (B.toStrict  . BB.toLazyByteString) (getUntil' c mempty)
 getMessageComponent :: Get (Char,String)
 getMessageComponent = do
     n <- getWord8
-    b <- getUntil 0
-    return ( chr (fromIntegral n) , (T.unpack . T.decodeUtf8) b )
+    s <- if n == 0 then return "" else do { b <- getUntil 0; return (byteStringToString b) } 
+    return ( chr (fromIntegral n) , s )
     
 getMessageComponents :: Get [(Char, String)]
 getMessageComponents = getMessageComponents' []
   where getMessageComponents' a = do
-          b <- lookAhead getWord8
-          if b == 0 then getWord8 >> return a else do 
             c <- getMessageComponent
-            getMessageComponents' (c : a)
+            if fst c == '\0' then return a else getMessageComponents' (c : a)
 
 getFieldDef :: a -> Get FieldDef
 getFieldDef _n = do
@@ -152,8 +157,8 @@ getFieldDef _n = do
   e <- getInt16
   f <- getInt32
   g <- getInt16
-  return $ FieldDef ((T.unpack . T.decodeUtf8) a) b c d e f g
-  
+  return $ FieldDef (byteStringToString a) b c d e f g
+
 instance Binary PgMessage where
   get = do
     b <- fmap (chr . fromIntegral) getWord8
@@ -167,10 +172,11 @@ instance Binary PgMessage where
           5 -> do
             md <- getByteString 4
             return $ Authentication 5 md
+          _ -> return $ Authentication au B.empty
       'S' -> do 
           a <- getByteString (len - 5)
-          let [b,c] = B.split 0 a
-          return $ ParameterStatus ((T.unpack . T.decodeUtf8) b) ((T.unpack . T.decodeUtf8) c)
+          let [p,q] = B.split 0 a
+          return $ ParameterStatus (byteStringToString p) (byteStringToString q)
       'K' -> BackendKey <$> fmap fromIntegral getWord32be <*> fmap fromIntegral getWord32be
       'Z' -> ReadyForQuery . chr . fromIntegral <$> getWord8
       'T' -> do
@@ -181,7 +187,7 @@ instance Binary PgMessage where
           DataRow <$> mapM getFieldData [1..flds]
       'C' -> do
           a <- getByteString (len - 5)
-          return $ CommandComplete ((T.unpack . T.decodeUtf8) a)
+          return $ CommandComplete (byteStringToString a)
       'V' -> FunctionResult <$> getFieldData 1
       'E' -> ErrorResponse <$> getMessageComponents
       '1' -> return ParseComplete
@@ -194,18 +200,19 @@ instance Binary PgMessage where
       'n' -> return NoData
       'N' -> NoticeResponse <$> getMessageComponents
       'A' -> do
-          proc <- fmap fromIntegral getWord32be
+          prc <- fmap fromIntegral getWord32be
           chan <- getUntil 0
           pay <- getUntil 0
-          return (Notification proc ((T.unpack . T.decodeUtf8) chan) ((T.unpack . T.decodeUtf8) pay))
+          return (Notification prc (byteStringToString chan) (byteStringToString pay))
       't' -> undefined -- ParameterDescription 
+      'X' -> return Terminate -- never really sent by the backend, but pseudo-sent when the socket is closed
       _ -> undefined
 
   put (Query s) = putByte 'Q' >> putStringMessage s
 
   put (StartUpMessage a ) = do
-     let m = concatMap (\(x,y) -> [(T.encodeUtf8 . T.pack) x, (T.encodeUtf8 . T.pack) y] ) a
-         j = 9 + (foldl (\x y -> x + 1 + B.length y) 0 m)
+     let m = concatMap (\(x,y) -> [stringToByteString x, stringToByteString y] ) a
+         j = 9 + foldl (\x y -> x + 1 + B.length y) 0 m
      int32 j
      int32 protocolVersion
      mapM_ hString m
@@ -215,19 +222,22 @@ instance Binary PgMessage where
   put Sync = putByte 'S' >> putWord32be 4
   put Flush = putByte 'H' >> putWord32be 4
   put SSLRequest = putByte 'F' >> putWord32be 8 >> putWord32be 80877103
-  put (Password p u b) = let rp = B.concat ["md5", stringMD5 $ md5 ( B.concat [ stringMD5 $ md5 (B.concat [(T.encodeUtf8 . T.pack) p,(T.encodeUtf8 . T.pack) u]), b] )] 
+  put (Password p u b) = let rp = B.concat ["md5", stringMD5 $ md5 ( B.concat [ stringMD5 $ md5 (B.concat [stringToByteString p, stringToByteString u]), b] )] 
                           in putByte 'p' >> putWord32be ( fromIntegral (B.length rp + 5)) >> putByteString rp >> zero
 
+
+{-
   put (Parse nam stmt typs) = do
-    let namb = (T.encodeUtf8 . T.pack) nam
-        stmtb = (T.encodeUtf8 . T.pack) stmt
+    let namb = stringToByteString nam
+        stmtb = stringToByteString stmt
     putByte 'P'
     putWord32be (fromIntegral (B.length namb + B.length stmtb + 8 + (4 * length typs)))
     putByteString namb >> zero
     putByteString stmtb >> zero
     putWord16be (fromIntegral (length typs))
     mapM_ (putWord32be . fromIntegral) typs
-  
+  -}
+
   put (FunctionCall oid fvs) = do
       putByte 'F'
       putWord32be (fromIntegral ml)
@@ -236,16 +246,16 @@ instance Binary PgMessage where
       putWord16be (fromIntegral (length fvs))
       putByteString args
       putWord16be 0 -- result is text
-    where args = B.toStrict (runPut (mapM_ put fvs))
+    where args = BL.toStrict (runPut (mapM_ put fvs))
           ml = 14 + B.length args
 
-  put (Execute port max) = do
+  put (Execute port mx) = do
       putByte 'E'
       putWord32be (fromIntegral ml)
       putByteString namb
       zero
-      putWord32be (fromIntegral max)
-    where namb = (T.encodeUtf8 . T.pack) port
+      putWord32be (fromIntegral mx)
+    where namb = stringToByteString port
           ml = 9 + B.length namb
   
   put (Parse nam stmt dts) = do
@@ -255,8 +265,8 @@ instance Binary PgMessage where
       putByteString stmtb >> zero
       putWord16be (fromIntegral (length dts))
       mapM_ (putWord32be . fromIntegral) dts
-    where namb = (T.encodeUtf8 . T.pack) nam
-          stmtb = (T.encodeUtf8 . T.pack) stmt
+    where namb = stringToByteString nam
+          stmtb = stringToByteString stmt
           ml = (4*length dts) + 8 + B.length namb + B.length stmtb
 
   put (Bind nam stmt vals) = do
@@ -268,16 +278,16 @@ instance Binary PgMessage where
       putWord16be (fromIntegral (length vals))
       putByteString args
       putWord16be 0 -- all use text
-    where args = B.toStrict (runPut (mapM_ putFieldValue vals))
-          namb = (T.encodeUtf8 . T.pack) nam
-          stmtb = (T.encodeUtf8 . T.pack) stmt
+    where args = BL.toStrict (runPut (mapM_ putFieldValue vals))
+          namb = stringToByteString nam
+          stmtb = stringToByteString stmt
           ml = B.length namb + B.length stmtb + 12 + B.length args
   
-  put (CancelRequest proc key) = do
+  put (CancelRequest prc key) = do
       putByte 'F'
       putWord32be 16
       putWord32be 80877102
-      putWord32be (fromIntegral proc)
+      putWord32be (fromIntegral prc)
       putWord32be (fromIntegral key)
   
   put (ClosePortal x) = dcp 'C' 'P' x
@@ -291,7 +301,7 @@ instance Binary PgMessage where
       putByte 'f'
       putWord32be (fromIntegral ml)
       putByteString a >> zero
-    where a = (T.encodeUtf8 . T.pack) x
+    where a = stringToByteString x
           ml = B.length a + 5
   
   put (DescribePortal x) = dcp 'D' 'P' x
@@ -299,23 +309,25 @@ instance Binary PgMessage where
     
   put _ = undefined
 
+putStringMessage :: String -> Put
 putStringMessage s = do
-  let sb = (T.encodeUtf8 . T.pack) s
+  let sb = stringToByteString s
   putWord32be ( fromIntegral (B.length sb + 5))
   putByteString sb
   zero
 
+putFieldValue :: Maybe ByteString -> Put
 putFieldValue fv = case fv of 
-    Nothing -> putWord32be (fromIntegral (-1))
+    Nothing -> putWord32be (fromIntegral (-1 :: Int))
     Just b -> putWord32be (fromIntegral (B.length b)) >> putByteString b
 
+putByte :: Char -> Put
+putByte = putWord8 . fromIntegral . ord
 
-putByte = putWord8 . (fromIntegral . ord) 
-
-
+dcp :: Char -> Char -> String -> Put
 dcp a b x = do
   putByte a
-  let nam = (T.encodeUtf8 . T.pack) x
+  let nam = stringToByteString x
   putWord32be (fromIntegral (6 + B.length nam))
   putByte b
   putByteString nam
@@ -331,13 +343,16 @@ data FormatCode = TextCode | BinaryCode
   deriving (Eq,Ord,Show)
 
 -- | A type-specific modifier.
-data Modifier = Modifier
+-- data Modifier = Modifier
 
 -- | A PostgreSQL object ID.
-type ObjectId = Int
+-- type ObjectId = Int
 
 loop :: IO () -> IO ()
 loop f = f >> loop f
+
+doUntil :: IO Bool -> IO ()
+doUntil f = f >>= (`unless` doUntil f)
 
 connectTo :: String -> Int -> [(String,String)] -> IO Postgres -- host port path headers 
 connectTo host port smp = do
@@ -350,17 +365,16 @@ connectTo host port smp = do
     rchan <- newChan  :: IO (Chan PgMessage) -- responses
     
     -- I'll have to figure out how to handle socket closing
-
     S.connect sock (S.addrAddress $ head addrInfos)
 
-    let xq = [(maybe "" id $ lookup "user" smp),(maybe "" id $ lookup "password" smp)]  
+    let xq = [fromMaybe "" $ lookup "user" smp, fromMaybe "" $ lookup "password" smp]  
 
     -- this pair of threads takes outbound messages and writes them to a socket,
     -- and takes inbound messages and writes them to a channel
     -- (i.e., conversion from channel to socket and back)
 
-    _ <- forkIO $ loop $ sendReq qchan sock
-    _ <- forkIO $ loop $ processResponse rchan sock xq
+    _ <- forkIO $ doUntil $ sendReq qchan sock
+    _ <- forkIO $ doUntil $ processResponse rchan sock xq
 
     -- this process reads and writes to the socket from a pair of request/response channels
     -- _ <- forkIO $ finally
@@ -380,6 +394,7 @@ connectTo host port smp = do
   where getResults x g@(daccum, oaccum, saccum) = do
                     a <- readChan x
                     case a of 
+                      Terminate -> return EndSession
                       ParseComplete -> getResults x g-- this means ignore the ParseComplete
                       BindComplete -> getResults x g
                       CloseComplete -> getResults x g
@@ -389,36 +404,35 @@ connectTo host port smp = do
                       CommandComplete s -> let z = if null oaccum then Nothing else Just $ head oaccum
                                             in return $ ResultSet z (reverse daccum) s
                       ErrorResponse r -> return $ ErrorMessage r
-                      ReadyForQuery z -> do
-                        return $ OtherResult (reverse saccum)
+                      ReadyForQuery z -> return $ OtherResult (reverse saccum)
                       -- do
 --                        (bs, cc) <- unfoldWhile (getDataRow x)
 --                        let cx = case cc of { CommandComplete z -> z; _ -> show cc }
 --                         getResults x (ResultSet (Just rd) bs cx : accum)
                       _ -> getResults x (daccum, oaccum, a : saccum)
 
-        getDataRow x = readChan x >>= return . (\y -> case y of { DataRow d -> Right (d :: DataRowT) ; e@_ -> Left e } )
+       -- getDataRow x = readChan x >>= return . (\y -> case y of { DataRow d -> Right (d :: DataRowT) ; e@_ -> Left e } )
 
 
 -- getResponse :: Postgres -> IO PgResult
 -- getResponse (Postgres a x) = readChan x
 
 sendQuery :: Postgres -> PgQuery -> IO ()
-sendQuery (Postgres z x) s = writeChan z s
+sendQuery (Postgres z _) = writeChan z 
 
+{-
 unfoldWhile :: IO (Either b a) -> IO ([a],b)  -- the list of "whiles" and the terminator
-unfoldWhile m = loop 
-    where loop = m >>= \e -> case e of { Right x -> loop >>= (\(xs, r) -> return (x:xs, r)); Left y -> return ([],y) } 
+unfoldWhile m = xloop 
+    where xloop = m >>= \e -> case e of { Right x -> xloop >>= (\(xs, r) -> return (x:xs, r)); Left y -> return ([],y) } 
+-}
 
 doQuery :: Postgres -> PgQuery -> IO PgResult
-doQuery (Postgres z x) s = do 
-    writeChan z s
-    readChan x
+doQuery (Postgres z x) s = writeChan z s >> readChan x
 
 getNextResult :: Postgres -> IO PgResult
-getNextResult (Postgres z x) = readChan x
+getNextResult (Postgres _ x) = readChan x
 
-sendReq :: Chan PgMessage -> S.Socket -> {- Chan PgMessage -> -} IO ()
+sendReq :: Chan PgMessage -> S.Socket -> {- Chan PgMessage -> -} IO Bool
 sendReq c s {- rc -} = do
   q <- readChan c
   printMsg ("sending " ++ show q)
@@ -429,7 +443,10 @@ sendReq c s {- rc -} = do
   case q of 
     Query _ -> do
       sendBlock s Flush
-  
+      return False
+    Terminate -> do
+      S.sClose s
+      return True
 
 --     StartUpMessage a b -> do 
 --       let xq = [(maybe "" id $ lookup "user" a),(maybe "" id $ lookup "password" b)]    
@@ -442,21 +459,24 @@ sendReq c s {- rc -} = do
 --      print "sent bind"
     Execute _ _ -> do
        sendBlock s Flush
+       return False
 --        print "sent exec"
 
-    _ -> return ()
+    _ -> return False
 
 -- I should move this to the outer ring
-processResponse :: Chan PgMessage -> S.Socket -> [String] -> IO ()
+processResponse :: Chan PgMessage -> S.Socket -> [String] -> IO Bool
 processResponse rc s xq = do
   a <- readResponse s
   printMsg ("receiving "++ show a)
   case a of
     Authentication 5 bx -> do
        sendBlock s (Password (head (tail xq)) (head xq) bx)
+       return False
+    Terminate -> writeChan rc a >> return True
 --       processResponse s rc xq
 --    Authentication 0 _ -> processResponse s rc xq
-    _ -> writeChan rc a
+    _ -> writeChan rc a >> return False
 --          case a of 
             -- response can be parsecomplete or error (for parse)
             -- response can be bindcomplete or error (for parse)
@@ -479,13 +499,12 @@ reallyRead s len = do
 
 readResponse :: S.Socket -> IO PgMessage
 readResponse s = do
-  more <- reallyRead {- S.recv -} s 5 :: IO B.ByteString
-  if B.null more then error "pg_reader read nothing"
-  else let typ = B.head more
-           len = (runGet getInt32 (B.fromChunks [B.tail more])) - 4
-        in do msg <- reallyRead s len
-              return $ runGet get (B.fromChunks [more, msg])
+    more <- catch (reallyRead s 5) ( (\x -> do {printMsg (show x) ; return B.empty} ) :: SomeException -> IO ByteString) 
+    if B.null more then return Terminate
+    else do msg <- reallyRead s ( runGet getInt32 (BL.fromChunks [B.tail more]) - 4 )
+            return $ runGet get (BL.fromChunks [more, msg])
 
+protocolVersion :: Int
 protocolVersion = 0x30000
 
 -- | Put a Haskell string, encoding it to UTF-8, and null-terminating it.
@@ -509,12 +528,11 @@ getInt16 = fmap fromIntegral (fmap fromIntegral getWord16be :: Get Int16)
 
 -- | Send a block of bytes on a handle, prepending the complete length.
 sendBlock :: Binary a => S.Socket -> a -> IO ()
-sendBlock h outp = sendAll h (B.toStrict (runPut (put outp)))
-
-sendAll h msg = do
-  n <- S.send h msg
-  if n <= 0 then error "failed to send"
-  else let rm = B.drop n msg in if B.null rm then return () else sendAll h rm
+sendBlock h outp = sendAll h (BL.toStrict (runPut (put outp)))
+  where sendAll j msg = do
+           n <- S.send j msg
+           if n <= 0 then error "failed to send"
+           else let rm = B.drop n msg in unless (B.null rm) (sendAll j rm)
 
 --------------------------------------------------------------------------------
 -- Connection
@@ -522,35 +540,35 @@ sendAll h msg = do
 connectToDb :: String -> IO Postgres
 connectToDb conns = do
     let [h,p,un,db]=glx conns
-        pi = (read p :: Int )
-    Just pw <- passwordFromPgpass h pi db un
+        pk = read p :: Int
+    Just pw <- passwordFromPgpass h pk db un
     let smp = [("user", un),("database",db)]
-    conn <- connectTo h pi ( ("password",pw) : smp )
-    doQuery conn (StartUpMessage smp)
+    conn <- connectTo h pk ( ("password",pw) : smp )
+    sumsg <- doQuery conn (StartUpMessage smp)
+    printMsg (show sumsg)
     return conn
 
 --------------------------------------------------------------------------------
 -- Connection String
+keyval :: CharParser () (String,String)
+keyval = do
+  _ <- spaces
+  a <- many1 alphaNum
+  _ <- char '=' <|> char ':'
+  b <- many1 (noneOf " ")
+  _ <- spaces
+  traceShow (a,b) $ return (a,b)
 
 dlml :: CharParser () [String]
 dlml = do
-  string "host="
-  a <- many (noneOf " ")
-  spaces
-
-  string "port="
-  b <- many digit
-  spaces
-
-  string "user="
-  u <- many (noneOf " ")
-  spaces
-
-  string "dbname="
-  d <- many (noneOf " ")
-  spaces
-
-  return [a,b,u,d]
+  z <- many keyval
+  let u = unsafePerformIO (getEnv "USER")
+      a = lookupWithDefault "localhost" "host" z
+      b = lookupWithDefault "5432" "port" z
+      c = lookupWithDefault u "user" z
+      d = lookupWithDefault "" "dbname" z
+  
+  return [a,b,c,d]
 
 
 
@@ -575,22 +593,22 @@ parsePgpassLine a =
       p2 = if null nm then 0 else (fst . head) nm
       (d,x) = break (==':') (xtail y)
       (u,v) = break (==':') (xtail x)
-      (pw,zz) = break (==':') (xtail v)
+      (pw,_zz) = break (==':') (xtail v)
    in (h,p2,d,u,pw)
 
 
 valine :: String -> Bool
 valine a = let z = dropWhile isSpace a
-            in not (null z) && not (head z == '#')
+            in not (null z) && (head z /= '#')
 
 passwordFromPgpass :: String -> Int -> String -> String -> IO (Maybe String)
-passwordFromPgpass h p db uid = do
+passwordFromPgpass h p dn uid = do
     hm <- getHomeDirectory
-    a <- readFile (combine hm ".pgpass")
+    a <- readFile (hm </> ".pgpass")
     let b = map parsePgpassLine (filter valine (lines a))
-    let c = filter (pgmatch h p db uid) b
+    let c = filter (pgmatch h p dn uid) b
     return (if null c then Nothing else let (_,_,_,_,r) = head c in Just r)
-  where pgmatch h p db uid z@(h',p',db',uid',_) = h' == h && p' == p && ( db' == "*" || db' == db ) && uid' == uid
+  where pgmatch k w dx u (k',w',dx',u',_) = k' == k && w' == w && ( dx' == "*" || dx' == dx ) && u' == u
 
 --------------------------------------------------------------------------------
 
