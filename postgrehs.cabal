@@ -3,7 +3,7 @@ Version:        0.1
 Cabal-Version:  >= 1.18
 License:        PublicDomain
 Author:         r0ml
-Synopsis:       Compare two sets of Postgres schemas and show the differences
+Synopsis:       Support for Postgres database (driver and utilities)
 Build-Type:     Simple
 
 Library
@@ -20,3 +20,17 @@ Executable hspg
   Ghc-options: -Wall
   Default-language:   Haskell2010
   Build-depends:      preface, base, bytestring, network, parsec
+
+Executable pg_schema_diff
+  Build-Depends:  template-haskell, postgrehs, preface, base, array, bytestring, text, parsec
+  Main-Is:        PgSchemaDiff.hs
+  Ghc-options:    -Wall 
+  Hs-Source-Dirs: schema-diff .
+  Default-Language: Haskell2010
+
+Executable test_postgres
+  Build-Depends:  template-haskell, base, array, bytestring, text, postgrehs, preface, parsec
+  Main-Is:        TestPostgres.hs
+  Ghc-options:    -Wall 
+  Hs-Source-Dirs: schema-diff .
+  Default-Language: Haskell2010

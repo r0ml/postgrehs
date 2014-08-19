@@ -16,7 +16,7 @@ main = do
     e <- sendQuery conn (Parse "stm" "select * from pg_tables where schemaname = $1" [1043])
     print e
     
-    f <- sendQuery conn (Bind "clem" "stm" [Just $ stringToByteString a2])
+    f <- sendQuery conn (Bind "clem" "stm" [Just $ asByteString a2])
     print f
     
     g <- doQuery conn (Execute "clem" 3)
