@@ -57,7 +57,7 @@ data PgMessage = StartUpMessage [(String,String)]
     | DescribeStatement String
     | Execute String Int
     | Flush
-    | FunctionCall Oid [FieldValue]
+--    | FunctionCall Oid [FieldValue]  -- considered legacy
     | Parse String String [DataType]
     | Password String String ByteString -- might be MD5'd
     | Query String
@@ -261,7 +261,8 @@ instance Binary PgMessage where
   put (Password p u b) = let rp = strCat ["md5", stringMD5 $ md5 ( strCat [ stringMD5 $ md5 (strCat [asByteString p, asByteString u]), b] )] 
                           in putByte 'p' >> putWord32be ( fromIntegral (strLen rp + 5)) >> putByteString rp >> zero
 
-  put (FunctionCall oid fvs) = do
+{- -- considered legacy
+      put (FunctionCall oid fvs) = do
       putByte 'F'
       putWord32be (fromIntegral ml)
       putWord32be (fromIntegral oid)
@@ -269,9 +270,10 @@ instance Binary PgMessage where
       putWord16be (fromIntegral (length fvs))
       putByteString args
       putWord16be 0 -- result is text
-    where args = asByteString (runPut (mapM_ put fvs))
+    where args = asByteString (runPut (mapM_ putFieldValue fvs))
           ml = 14 + strLen args
-
+-}
+                        
   put (Execute port mx) = do
       putByte 'E'
       putWord32be (fromIntegral ml)
