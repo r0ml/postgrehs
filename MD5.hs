@@ -3,7 +3,7 @@
 module MD5 (md5, md5File, stringMD5) where
 
 import Preface
-import qualified Data.ByteString as B
+
 import qualified Data.ByteString.Internal as B (toForeignPtr)
 
 {-
@@ -21,25 +21,25 @@ import System.IO.Unsafe (unsafePerformIO)
 -}
 
 data MD5State = MD5State Word32 Word32 Word32 Word32 deriving Show
-type Digest = B.ByteString
+type Digest = ByteString
 
-md5 :: B.ByteString -> Digest
+md5 :: ByteString -> Digest
 md5 arg = (md5Finalize . foldl' md5Update md5InitialState . blocks) arg
       where md5InitialState = MD5State 0x67452301 0xEFCDAB89 0x98BADCFE 0x10325476
-            md5Finalize (MD5State a b c d) = B.pack $ concatMap intToBytes [a,b,c,d]
+            md5Finalize (MD5State a b c d) = pack $ concatMap intToBytes [a,b,c,d]
             intToBytes n = map (fromIntegral . (.&. 0xff) . shiftR n) (take 4 [0,8..])
-            blocks bs = if B.length bs >= bsz then B.take bsz bs : blocks ( B.drop bsz bs) 
-                        else let lzp = (bsz - 9) - B.length bs
+            blocks bs = if strLen bs >= bsz then strTake bsz bs : blocks ( strDrop bsz bs) 
+                        else let lzp = (bsz - 9) - strLen bs
                                  lzpx = if lzp < 0 then lzp+bsz else lzp
-                                 lm = B.concat [bs, B.singleton 0x80, B.replicate lzpx 0, longToBytes (8 * olen)]
-  	                         in if lzp < 0 then [ B.take bsz lm, B.drop bsz lm] else [lm]
+                                 lm = strCat [bs, stringleton 0x80, strReplicate lzpx 0, longToBytes (8 * olen)]
+  	                         in if lzp < 0 then [ strTake bsz lm, strDrop bsz lm] else [lm]
             bsz = 64
-            olen = fromIntegral (B.length arg)
-            longToBytes :: Word64 -> B.ByteString
-            longToBytes n =  B.pack $ map (fromIntegral . (.&. 0xff) . shiftR n) (take 8 [0,8..])
+            olen = fromIntegral (strLen arg)
+            longToBytes :: Word64 -> ByteString
+            longToBytes n =  pack $ map (fromIntegral . (.&. 0xff) . shiftR n) (take 8 [0,8..])
 
 -- takes 64 byte ByteString at a time.
-md5Update :: MD5State -> B.ByteString -> MD5State
+md5Update :: MD5State -> ByteString -> MD5State
 md5Update (MD5State a b c d) w =
     let ws = cycle (wordsFromBytes w)
  
@@ -70,10 +70,10 @@ md5Update (MD5State a b c d) w =
       everynth n ys = head ys : everynth n (drop (n+1) ys )
       wordsFromBytes bs = unsafePerformIO $ withForeignPtr ptr $ \p -> peekArray (len `div` 4) (castPtr (p `plusPtr` off) :: Ptr Word32) where (ptr, off, len) = B.toForeignPtr bs
 
-stringMD5 :: B.ByteString -> B.ByteString
-stringMD5 = B.concatMap (shex . fromEnum)
-  where shex n = let (a,b) = divMod n 16 in B.cons (B.index chars a) (B.singleton (B.index chars b))
-        chars = "0123456789abcdef" :: B.ByteString
+stringMD5 :: ByteString -> ByteString
+stringMD5 = strConcatMap (shex . fromEnum)
+  where shex n = let (a,b) = divMod n 16 in strCons (nth chars a) (stringleton (nth chars b))
+        chars = "0123456789abcdef" :: ByteString
 
 md5File :: String -> IO ()
-md5File f = openFile f ReadMode >>= B.hGetContents >>= print . stringMD5 . md5
+md5File f = openFile f ReadMode >>= strHGetContents >>= print . stringMD5 . md5

@@ -1,9 +1,11 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Console where
 
-import Data.List(intercalate)
+import Preface
 
-csi :: Show a => [a] -> String -> String
-csi args code = concat ["\ESC[" ,  intercalate ";" (map show args), code ]
+csi :: Show a => [a] -> ByteString -> ByteString
+csi args code = strConcat ["\ESC[" ,  intercalate ";" (map (asByteString . show) args), code ]
 
 peach = setExtendedColor 202
 azure = setExtendedColor  27
@@ -15,7 +17,7 @@ charCheck = '\x2714'
 charLeftArrow = '\x2b05'
 charRightArrow = '\x279c'
 
-neq = concat [setAttr bold , " ", [charNotEquals], " " , treset]
+neq = strConcat [setAttr bold , " ", stringleton (asByte charNotEquals)  , " " , treset]
 
 setAttr x = csi [x] "m"
 bold = 1

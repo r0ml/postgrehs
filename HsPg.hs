@@ -7,7 +7,7 @@ main :: IO ()
 main = do
     (a1:a2:_) <- getArgs
     
-    conn <- PG.connectToDb a1
+    conn <- PG.connectToDb (asText a1)
     
 {-    
     d <- doQuery a (FunctionCall 1598 [])

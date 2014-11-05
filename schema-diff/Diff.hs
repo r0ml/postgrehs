@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, OverloadedStrings #-}
 
 -----------------------------------------------------------------------------
 -- This is an implementation of the O(ND) diff algorithm as described here
@@ -10,11 +10,12 @@ module Diff (
   diff
 ) where
 
-import Prelude hiding (pi)
-import Data.Array ( (!), listArray)
-import Data.String (fromString)
+import Preface
 import Console
-import Data.List (isSuffixOf)
+-- import Prelude hiding (pi)
+import Data.Array ( (!), listArray)
+-- import Data.String (fromString)
+-- import Data.List (isSuffixOf)
 -- import Debug.Trace
 
 data WhichInput = First | Second | Both deriving (Show, Eq)
@@ -122,8 +123,8 @@ coalzip (a@(Unchanged ls1 lc1 rs1 rc1) : b@(Unchanged ls2 lc2 rs2 rc2) : rest, z
 coalzip (a:b,z) = coalzip (b, a : z)
 coalzip ([],z) = ([],z)
 
-prettyLines :: Char -> [String] -> String
-prettyLines start lins = fromString $ concatMap (\x -> fromString [start,' ']++x++fromString "\n") lins
+prettyLines :: Char -> [Text] -> Text
+prettyLines start lins = concatMap (\x -> fromString [start,' ']++x++ "\n") lins
 
 type LineNo = Int
 

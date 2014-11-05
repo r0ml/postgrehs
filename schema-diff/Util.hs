@@ -1,19 +1,16 @@
 
 module Util (
-  module Data.List,
   module Console,
   module Util,
-  module Data.Char
 )
 
 where
 
 import PostgreSQL
+import Preface
 import Console
-import Data.List (intercalate)
-import Data.Char (isSpace)
 
-gs :: PgResult -> String
+gs :: PgResult -> Text
 gs = undefined
 
 gi :: PgResult -> Int
@@ -37,22 +34,26 @@ gi y@(SqlInt32 x) = fromSql y
 
 data Comparison a = Equal a | LeftOnly a | RightOnly a | Unequal a a
 
-sok :: String
-sok = concat [ setColor dullGreen,  [charCheck] ,  " "]
-nok :: String
-nok = concat [setColor dullRed, setAttr bold, [charNotEquals], " "]
+sok :: Text
+sok = strConcat [ setColor dullGreen,  [charCheck] ,  " "]
+nok :: Text
+nok = strConcat [setColor dullRed, setAttr bold, [charNotEquals], " "]
 
-trim :: String -> String
+trim :: Text -> Text
 trim [] = []
 trim x@(a:y) = if (isSpace a) then trim y else x
 
-compareIgnoringWhiteSpace :: String -> String -> Bool
+compareIgnoringWhiteSpace :: Text -> Text -> Bool
 compareIgnoringWhiteSpace x y = ciws (trim x) (trim y)
-  where ciws x@(a:p) y@(b:q) =
-             if (isSpace a && isSpace b) then ciws (trim p) (trim q) else
-             if (a == b) then ciws p q else False
-        ciws x [] = null (trim x)
-        ciws [] y = null (trim y)
+  where ciws x y =
+          let a = strHead x
+              b = strHead y
+              p = strTail x
+              q = strTail y
+           in if (isSpace a && isSpace b) then ciws (stripStart p) (stripStart q) else
+              if (a == b) then ciws p q else False
+        ciws x [] = strNull (stripStart x)
+        ciws [] y = strNull (stripStart y)
 
 count x a = foldl (flip ((+) . fromEnum . x)) 0 a
 dcount x y = foldl (\(a,b) z -> if (x z) then (a+1,b) else (a,b+1)) (0,0) y 

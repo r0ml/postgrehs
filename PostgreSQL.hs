@@ -30,48 +30,48 @@ type Postgres = IORef PostgresR
 data PostgresX = PostgresX { pgSend :: Chan PgQuery, pgRecv :: Chan PgResult,
                              pgConnInfo :: PgConnInfo }
 
-data PgConnInfo = PgConnInfo String String Int String String String -- origstring, host, port, dbname, userid, password
+data PgConnInfo = PgConnInfo Text Text Int Text Text Text -- origstring, host, port, dbname, userid, password
   deriving (Show)
            
 data PgResult =
-        ResultSet (Maybe RowDescriptionT) [DataRowT] String
-      | ErrorMessage [(Char, String)]
+        ResultSet (Maybe RowDescriptionT) [DataRowT] Text
+      | ErrorMessage [(Char, Text)]
       | EndSession
       | OtherResult [PgMessage]
     deriving (Show)
 
 type PgQuery = PgMessage
 
-data PgMessage = StartUpMessage [(String,String)] 
-    | Bind String String [FieldValue]
+data PgMessage = StartUpMessage [(Text,Text)] 
+    | Bind Text Text [FieldValue]
     | CancelRequest Int Int
-    | ClosePortal String
-    | CloseStatement String
+    | ClosePortal Text
+    | CloseStatement Text
     | CopyData ByteString
     | CopyDone
     | CopyInResponse Bool [Bool]
     | CopyOutResponse Bool [Bool]
     | CopyBothResponse Bool [Bool] 
-    | CopyFail String
-    | DescribePortal String
-    | DescribeStatement String
-    | Execute String Int
+    | CopyFail Text
+    | DescribePortal Text
+    | DescribeStatement Text
+    | Execute Text Int
     | Flush
 --    | FunctionCall Oid [FieldValue]  -- considered legacy
-    | Parse String String [DataType]
-    | Password String String ByteString -- might be MD5'd
-    | Query String
+    | Parse Text Text [DataType]
+    | Password Text Text ByteString -- might be MD5'd
+    | Query Text
     | SSLRequest
     | Sync
     | Terminate
     | Authentication Int ByteString
-    | ParameterStatus String String
+    | ParameterStatus Text Text
     | BackendKey Int Int
     | RowDescription RowDescriptionT
     | DataRow DataRowT
     | FunctionResult FieldValue
-    | NoticeResponse [(Char,String)]
-    | Notification Int String String
+    | NoticeResponse [(Char,Text)]
+    | Notification Int Text Text
     | CloseComplete
     | EmptyQuery
     | NoData
@@ -79,8 +79,8 @@ data PgMessage = StartUpMessage [(String,String)]
     | ParseComplete
     | BindComplete
     | PortalSuspended
-    | ErrorResponse [(Char,String)]
-    | CommandComplete String
+    | ErrorResponse [(Char,Text)]
+    | CommandComplete Text
     deriving (Show)
 
 class PgValue a where
@@ -89,8 +89,8 @@ class PgValue a where
 instance PgValue Int where
   fromPg = read . asString . fromMaybe "0"
 
-instance PgValue String where
-  fromPg = asString . fromMaybe ""
+instance PgValue Text where
+  fromPg = asText . fromMaybe ""
 
 instance PgValue Bool where
   fromPg = (== "t") . asString . fromMaybe "f" 
@@ -98,14 +98,20 @@ instance PgValue Bool where
 instance PgValue a => PgValue [a] where
   fromPg x = let y = parse tpl "" (maybe "" asString x) in case y of { Left z -> error (show z); Right z -> map (fromPg . Just . asByteString) z } 
 
+dquote :: Parser Char
 dquote = char '"' <?> "double quote"
+
+quoted_char :: Parser Char
 quoted_char = try (do
     _ <- char '\\'
     r <- char '"'
     return r
   <?> "quoted_char" )
                  
-qtext = many( quoted_char <|> noneOf "\"")
+qtext :: Parser Text
+qtext = fmap asText (many( quoted_char <|> noneOf "\""))
+
+quoted_string :: Parser Text
 quoted_string = do 
     _ <- dquote
     r <- qtext
@@ -113,10 +119,10 @@ quoted_string = do
     return r
   <?> "quoted string"
 
-qst :: CharParser () String
-qst = quoted_string <|> many (noneOf ",)")
+qst :: Parser Text
+qst = quoted_string <|> fmap asText (many (noneOf ",)"))
 
-tpl :: CharParser () [String]
+tpl :: Parser [Text]
 tpl = do 
   _ <- char '('
   t <- sepBy qst (char ',')
@@ -127,8 +133,8 @@ tpl = do
 
 -- tupleField :: FieldValue -> 
 
-stringField :: FieldValue -> String
-stringField = asString . fromMaybe ""
+stringField :: FieldValue -> Text
+stringField = asText . fromMaybe ""
 
 intField :: FieldValue -> Int
 intField = read . asString . fromMaybe "0"
@@ -140,7 +146,7 @@ boolField = (== "t") . asString . fromMaybe "f"
 -- type Parameter = String -- placeholder
 -- type Argument = String -- placeholder
 type DataType = Int -- placeholder
-data FieldDef = FieldDef String Int Int Int Int Int Int deriving (Show) -- placeholder
+data FieldDef = FieldDef Text Int Int Int Int Int Int deriving (Show) -- placeholder
 type FieldValue = Maybe ByteString -- placeholder
 type Oid = Int -- placeholder ?
 
@@ -172,13 +178,13 @@ getUntil c = fmap (asByteString  . BB.toLazyByteString) (getUntil' c mempty)
           n <- getWord8
           if n == cx then return a else getUntil' cx (a `mappend` BB.word8 n)
 
-getMessageComponent :: Get (Char,String)
+getMessageComponent :: Get (Char,Text)
 getMessageComponent = do
     n <- getWord8
-    s <- if n == 0 then return "" else do { b <- getUntil 0; return (asString b) } 
+    s <- if n == 0 then return "" else do { b <- getUntil 0; return (asText b) } 
     return ( chr (fromIntegral n) , s )
     
-getMessageComponents :: Get [(Char, String)]
+getMessageComponents :: Get [(Char, Text)]
 getMessageComponents = getMessageComponents' []
   where getMessageComponents' a = do
             c <- getMessageComponent
@@ -193,7 +199,7 @@ getFieldDef _n = do
   e <- getInt16
   f <- getInt32
   g <- getInt16
-  return $ FieldDef (asString a) b c d e f g
+  return $ FieldDef (asText a) b c d e f g
 
 instance Binary PgMessage where
   get = do
@@ -212,7 +218,7 @@ instance Binary PgMessage where
       'S' -> do 
           a <- getByteString (len - 5)
           let [p,q] = B.split 0 a
-          return $ ParameterStatus (asString p) (asString q)
+          return $ ParameterStatus (asText p) (asText q)
       'K' -> BackendKey <$> fmap fromIntegral getWord32be <*> fmap fromIntegral getWord32be
       'Z' -> ReadyForQuery . chr . fromIntegral <$> getWord8
       'T' -> do
@@ -223,7 +229,7 @@ instance Binary PgMessage where
           DataRow <$> mapM getFieldData [1..flds]
       'C' -> do
           a <- getByteString (len - 5)
-          return $ CommandComplete (asString a)
+          return $ CommandComplete (asText a)
       'V' -> FunctionResult <$> getFieldData 1
       'E' -> ErrorResponse <$> getMessageComponents
       '1' -> return ParseComplete
@@ -239,7 +245,7 @@ instance Binary PgMessage where
           prc <- fmap fromIntegral getWord32be
           chan <- getUntil 0
           pay <- getUntil 0
-          return (Notification prc (asString chan) (asString pay))
+          return (Notification prc (asText chan) (asText pay))
       't' -> undefined -- ParameterDescription 
       'X' -> return Terminate -- never really sent by the backend, but pseudo-sent when the socket is closed
       _ -> undefined
@@ -334,7 +340,7 @@ instance Binary PgMessage where
     
   put _ = undefined
 
-putStringMessage :: String -> Put
+putStringMessage :: Text -> Put
 putStringMessage s = do
   let sb = asByteString s
   putWord32be ( fromIntegral (strLen sb + 5))
@@ -349,7 +355,7 @@ putFieldValue fv = case fv of
 putByte :: Char -> Put
 putByte = putWord8 . fromIntegral . ord
 
-dcp :: Char -> Char -> String -> Put
+dcp :: Char -> Char -> Text -> Put
 dcp a b x = do
   putByte a
   let nam = asByteString x
@@ -431,7 +437,7 @@ sendReq c s {- rc -} = do
     _ -> return False
 
 -- I should move this to the outer ring
-processResponse :: Chan PgMessage -> Socket -> (String,String) -> IO Bool
+processResponse :: Chan PgMessage -> Socket -> (Text,Text) -> IO Bool
 processResponse rc s (uid,pwd) = do
   a <- readResponse s
   printMsg ("receiving "++ show a)
@@ -503,10 +509,10 @@ sendBlock h outp = sendAll h (asByteString (runPut (put outp)))
 --------------------------------------------------------------------------------
 -- Connection
 
-connectToDb :: String -> IO Postgres
+connectToDb :: Text -> IO Postgres
 connectToDb conns = do
     let [h,p,un,db]=glx conns
-        pk = read p :: Int
+        pk = read (asString p) :: Int
     pw <- fmap (fromMaybe "") (passwordFromPgpass h pk db un)
     let smp = [("user", un),("database",db)]
 
@@ -529,7 +535,7 @@ reconnect conn = do
       let PgConnInfo _ host port db un pwd = i
 
       let hints = defaultHints {addrFamily = AF_INET, addrSocketType = Stream}
-      addrInfos <- getAddrInfo (Just hints) (Just host) (Just $ show port)
+      addrInfos <- getAddrInfo (Just hints) (Just (asString host)) (Just $ show port)
       connq <- catch (sktConnect sock (addrAddress $ head addrInfos) >> return True )
                      (\x -> printMsg (show (x::SomeException)) >> return False)
 
@@ -601,19 +607,19 @@ connectTo ci@(PgConnInfo _ host port db uid pwd) = do
 
 --------------------------------------------------------------------------------
 -- Connection String
-keyval :: CharParser () (String,String)
+keyval :: Parser (Text,Text)
 keyval = do
   _ <- spaces
-  a <- many1 alphaNum
+  a <- fmap asText (many1 alphaNum)
   _ <- char '=' <|> char ':'
-  b <- many1 (noneOf " ")
+  b <- fmap asText (many1 (noneOf " "))
   _ <- spaces
   traceShow (a,b) $ return (a,b)
 
-dlml :: CharParser () [String]
+dlml :: CharParser () [Text]
 dlml = do
   z <- many keyval
-  let u = unsafePerformIO (getEnv "USER")
+  let u = asText (unsafePerformIO (getEnv "USER"))
       a = lookupWithDefault "localhost" "host" z
       b = lookupWithDefault "5432" "port" z
       c = lookupWithDefault u "user" z
@@ -624,39 +630,39 @@ dlml = do
 
 
 
-glx :: String -> [String]
+glx :: Text -> [Text]
 glx x =
-  let z = parse dlml "" x
+  let z = parse dlml "" (asString x)
   in case z of 
      Right y -> y
      Left y -> error (show y)
 
 --------------------------------------------------------------------------------
 -- pgpass support
-xtail :: [a] -> [a]
-xtail x = if null x then x else tail x
+xtail :: Stringy a b => a -> a
+xtail x = if strNull x then x else strTail x
 
-parsePgpassLine :: String -> (String,Int,String,String,String)
+parsePgpassLine :: Text -> (Text,Int,Text,Text,Text)
 parsePgpassLine a =
-  let (h,z) = break (==':') a
-      (p,y) = break (==':') (xtail z)
-      nm = (reads p :: [(Int, String)])
+  let (h,z) = strBreak (==':') a
+      (p,y) = strBreak (==':') (xtail z)
+      nm = (reads (asString p) :: [(Int, String)])
       p2 = if null nm then 0 else (fst . head) nm
-      (d,x) = break (==':') (xtail y)
-      (u,v) = break (==':') (xtail x)
-      (pw,_zz) = break (==':') (xtail v)
+      (d,x) = strBreak (==':') (xtail y)
+      (u,v) = strBreak (==':') (xtail x)
+      (pw,_zz) = strBreak (==':') (xtail v)
    in (h,p2,d,u,pw)
 
 
-valine :: String -> Bool
-valine a = let z = dropWhile isSpace a
-            in not (null z) && (head z /= '#')
+valine :: Text -> Bool
+valine a = let z = stripStart a
+            in not (strNull z) && (strHead z /= '#')
 
-passwordFromPgpass :: String -> Int -> String -> String -> IO (Maybe String)
+passwordFromPgpass :: Text -> Int -> Text -> Text -> IO (Maybe Text)
 passwordFromPgpass h p dn uid = do
     hm <- getHomeDirectory
-    a <- readFile (hm </> ".pgpass")
-    let b = map parsePgpassLine (filter valine (lines a))
+    a <- strReadFile (hm </> ".pgpass")
+    let b = map parsePgpassLine (filter valine (split '\n' a))
     let c = filter (pgmatch h p dn uid) b
     return (if null c then Nothing else let (_,_,_,_,r) = head c in Just r)
   where pgmatch k w dx u (k',w',dx',u',_) = k' == k && w' == w && ( dx' == "*" || dx' == dx ) && u' == u

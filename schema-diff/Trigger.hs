@@ -1,13 +1,13 @@
-{-# LANGUAGE QuasiQuotes, FlexibleInstances #-}
+{-# LANGUAGE QuasiQuotes, FlexibleInstances, OverloadedStrings #-}
 
 module Trigger where
 
 import PostgreSQL
+import Preface
 import Str(str)
 import Util
 import Diff
 import Data.Bits
-import Data.ByteString (ByteString)
 import Data.Maybe
 import Debug.Trace
 
@@ -37,8 +37,8 @@ mktt x = let w = if testBit x 1 then Before else if testBit x 6 then InsteadOf e
 {- tgtype is the type (INSERT, UPDATE) 
    tgattr is which column
  -}
-data DbTrigger = DbTrigger { schema :: String, relation :: String, name :: String, triggerType :: TriggerType, enabled :: Bool,
-                             procedure :: String, definition :: String }
+data DbTrigger = DbTrigger { schema :: Text, relation :: Text, name :: Text, triggerType :: TriggerType, enabled :: Bool,
+                             procedure :: Text, definition :: Text }
   deriving(Show)
 
 mkdbt :: [FieldValue] -> DbTrigger
@@ -67,7 +67,7 @@ instance Comparable DbTrigger where
     else Unequal a b
 
 
-compareTriggers :: (String -> IO PgResult, String -> IO PgResult) -> IO [Comparison DbTrigger]
+compareTriggers :: (Text -> IO PgResult, Text -> IO PgResult) -> IO [Comparison DbTrigger]
 compareTriggers (get1, get2) = do
     aa <- get1 triggerList
     let (ResultSet _ aa1 _) = aa
@@ -92,7 +92,7 @@ compareTriggers (get1, get2) = do
     putStr treset
     return $ filter (not . iseq) cc
 
-showTrigger x = concat [schema x, ".", relation x, "." , name x]
+showTrigger x = strConcat [schema x, ".", relation x, "." , name x]
 
 instance Ord DbTrigger where
   compare a b = let hd p = map ($ p) [schema, relation, name] in compare (hd a) (hd b)
