@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, FlexibleInstances #-}
+{-# LANGUAGE QuasiQuotes, FlexibleInstances, OverloadedStrings #-}
 
 module Table where
 
@@ -8,9 +8,10 @@ import Util
 import Diff
 
 import PostgreSQL
+import Preface
 import Data.Maybe
-import qualified Data.ByteString as B
 
+tblList :: String
 tblList = [str| 
 SELECT n.nspname AS "Schema", c.relname AS "Name", d.description AS "Comment",
   relacl AS "ACLs"
@@ -24,6 +25,7 @@ WHERE n.nspname IN (select * from unnest(current_schemas(false)))
 ORDER BY 1, 2
 |]
 
+tblColumns :: String
 tblColumns = [str|
 SELECT (c.oid, n.nspname,c.relname, c.relacl),
   a.attname, a.atttypid, a.atttypmod,a.attlen,
@@ -128,17 +130,17 @@ ORDER BY 1,2,3
 |]
 -}
 
-data DbTable = DbTable { schema :: String, name :: String, comment :: String, 
+data DbTable = DbTable { schema :: Text, name :: Text, comment :: Text, 
   columns :: [DbColumn], acl :: [Acl] } deriving(Show)
 
 data DbColumn = DbColumn {
-  attName :: String,
+  attName :: Text,
   attTypeId :: Int,
   attNotNull :: Bool,
   attTypMod :: Int,
   attLen :: Int,
   attNum :: Int,
-  adSrc :: String,
+  adSrc :: Text,
   typBaseType :: Int,
   typType :: Bool
 } deriving(Show)
@@ -165,10 +167,10 @@ amkdbt (tl, cl) nr =
 -}
 
 instance Show (Comparison DbTable) where
-    show (Equal x) = concat [sok, showTable x,  treset]
-    show (LeftOnly a) = concat [azure, [charLeftArrow]," ", showTable a, treset]
-    show (RightOnly a) = concat [peach, [charRightArrow], " ", showTable a,  treset]
-    show (Unequal a b) = concat [nok, showTable a,  treset, 
+    show (Equal x) = strConcat [ asString sok, asString $ showTable x, asString treset]
+    show (LeftOnly a) = concat [asString azure, stringleton charLeftArrow," ", asString $ showTable a, asString treset]
+    show (RightOnly a) = concat [asString peach, stringleton charRightArrow, " ", asString $ showTable a,  asString treset]
+    show (Unequal a b) = concat [asString nok, asString $ showTable a,  asString treset, 
          showAclDiffs (acl a) (acl b)
          ]
 
@@ -177,15 +179,16 @@ instance Comparable DbTable where
     if (acl a == acl b) then Equal a
     else Unequal a b
 
+compareTables :: (Text -> IO PgResult, Text -> IO PgResult) -> IO [Comparison DbTable]
 compareTables (get1, get2) = do
-    aa <- get1 tblColumns
+    aa <- get1 (asText tblColumns)
     let (ResultSet _ aa1 _) = aa
 
     -- aac <- get1 viewColumns
     -- aat <- get1 viewTriggers
     -- aar <- get1 viewRules
 
-    bb <- get2 tblColumns
+    bb <- get2 (asText tblColumns)
     let (ResultSet _ bb1 _) = bb
     -- bbc <- get2 viewColumns
     -- bbt <- get2 viewTriggers
@@ -196,12 +199,12 @@ compareTables (get1, get2) = do
 
     let cc = dbCompare a b
     let cnt = dcount iseq cc
-    putStr $ if (fst cnt > 0) then sok ++ (show $ fst cnt) ++ " matches, " else ""
-    putStrLn $ if (snd cnt > 0) then concat [setColor dullRed,show $ snd cnt," differences"] else concat [sok,"no differences"]
-    putStr $ treset
+    strPut $ if (fst cnt > 0) then asString sok ++ (show $ fst cnt) ++ " matches, " else ""
+    strPutLn $ if (snd cnt > 0) then concat [asString $ setColor dullRed,show $ snd cnt," differences"] else concat [asString sok,"no differences"]
+    strPut treset
     return $ filter (not . iseq) cc
 
-showTable x = (schema x) ++ "." ++ (name x) 
+showTable x = strConcat [schema x, ".", name x]
 
 instance Ord DbTable where
   compare a b = let hd p = map ($ p) [schema, name] in compare (hd a) (hd b)

@@ -102,25 +102,22 @@ dquote :: Parser Char
 dquote = char '"' <?> "double quote"
 
 quoted_char :: Parser Char
-quoted_char = try (do
-    _ <- char '\\'
-    r <- char '"'
-    return r
-  <?> "quoted_char" )
+quoted_char = try ( char '\\' >> char '\\' >> return '\\' ) <|>
+              try ( char '"' >> char '"' >> return '"') <?> "not quoted char"
                  
 qtext :: Parser Text
 qtext = fmap asText (many( quoted_char <|> noneOf "\""))
 
 quoted_string :: Parser Text
 quoted_string = do 
-    _ <- dquote
-    r <- qtext
-    _ <- dquote
-    return r
+      _ <- dquote
+      r <- qtext
+      _ <- dquote
+      return r
   <?> "quoted string"
 
 qst :: Parser Text
-qst = quoted_string <|> fmap asText (many (noneOf ",)"))
+qst = quoted_string <|> fmap asText (many (noneOf ",)")) <?> fail "qst error"
 
 tpl :: Parser [Text]
 tpl = do 
@@ -614,7 +611,7 @@ keyval = do
   _ <- char '=' <|> char ':'
   b <- fmap asText (many1 (noneOf " "))
   _ <- spaces
-  traceShow (a,b) $ return (a,b)
+  return (a,b)
 
 dlml :: CharParser () [Text]
 dlml = do

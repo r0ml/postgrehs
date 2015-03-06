@@ -1,8 +1,9 @@
-{-# LANGUAGE QuasiQuotes, FlexibleInstances #-}
+{-# LANGUAGE QuasiQuotes, FlexibleInstances, OverloadedStrings #-}
 
 module Proc where
 
 import PostgreSQL
+import Preface
 import Str(str)
 import Acl
 import Util
@@ -33,8 +34,8 @@ WHERE pg_catalog.pg_function_is_visible(p.oid)
 ORDER BY 1, 2, 3;
 |]
 
-data DbProc = DbProc { schema :: String, name :: String, argTypes :: String, resType :: String, ptype :: String,
-                       source :: String, acl :: [Acl] } deriving(Show, Eq)
+data DbProc = DbProc { schema :: Text, name :: Text, argTypes :: Text, resType :: Text, ptype :: Text,
+                       source :: Text, acl :: [Acl] } deriving(Show, Eq)
 
 -- FieldValue is Maybe ByteString
 mkdbp :: [FieldValue] -> DbProc
@@ -51,17 +52,17 @@ mkdbp (s : n : a : r : p : src : acl : _ ) = DbProc {
 -- mkdbp (a:b:c:d:e:f:g:_) = DbProc a b c d e f (cvtacl g)
 
 showProc :: DbProc -> String
-showProc x = (schema x) ++ "." ++ (name x) ++ "(" ++ (argTypes x) ++ ")"
+showProc x = asString (strConcat [schema x, ".", name x, "(", argTypes x, ")" ])
 
 instance Show (Comparison DbProc) where
-  show (Equal x) = concat [sok, showProc x,  treset]
-  show (LeftOnly a) = concat [azure, [charLeftArrow]," ", showProc a, treset]
-  show (RightOnly a) = concat [peach, [charRightArrow], " ", showProc a,  treset]
-  show (Unequal a b) = concat [nok, showProc a,  treset, 
-       if (resType a /= resType b) then concat [setAttr bold,"\n  resultTypes: ",treset, resType a, neq , resType b] else "",
+  show (Equal x) = concat [asString sok, showProc x,  asString treset]
+  show (LeftOnly a) = concat [asString azure, stringleton charLeftArrow," ", showProc a, asString treset]
+  show (RightOnly a) = concat [asString peach, stringleton charRightArrow, " ", showProc a,  asString treset]
+  show (Unequal a b) = concat [asString nok, showProc a, asString  treset, 
+       if (resType a /= resType b) then concat [asString $ setAttr bold,"\n  resultTypes: ", asString treset, asString $ resType a, asString neq , asString $ resType b] else "",
        -- if (acl a /= acl b) then concat[ setAttr bold, "\n  acls: " , treset, intercalate ", " $ acl a, neq,  intercalate ", " $ acl b] else "",
        if (compareIgnoringWhiteSpace (source a) (source b)) then ""
-          else concat [setAttr bold,"\n  source differences: \n", treset, concatMap show $ diff (lines $ source a) (lines $ source b)]
+          else concat [asString $ setAttr bold,"\n  source differences: \n", asString treset, concatMap show $ diff (split '\n' $ source a) (split '\n' $  source b)]
        ]
 
 instance Comparable DbProc where
@@ -69,26 +70,28 @@ instance Comparable DbProc where
     if (resType a == resType b && acl a == acl b && compareIgnoringWhiteSpace (source a) (source b)) then Equal a
     else Unequal a b
 
-compareProcs :: (String -> IO PgResult, String -> IO PgResult) -> IO [Comparison DbProc]
+compareProcs :: (Text -> IO PgResult, Text -> IO PgResult) -> IO [Comparison DbProc]
 compareProcs (get1, get2) = do
-    aa <- get1 functionList
+    aa <- get1 (asText functionList)
     let (ResultSet _ aa1 _) = aa
 -- here I have:  RowDescription, [DataRow], CommandComplete   ===> ResultSet
 
     let a = map mkdbp aa1
 
-    bb <- get2 functionList
+    bb <- get2 (asText functionList)
     let (ResultSet _ bb1 _) = bb
 
     let b = map mkdbp bb1
 
+    print "start dbcompare"
     let cc = dbCompare a b
-
+    print "past dbcompare"
+    
     let cnt = dcount iseq cc
 
-    putStr $ if (fst cnt > 0) then sok ++ (show $ fst cnt) ++ " matches, " else ""
-    putStrLn $ if (snd cnt > 0) then concat [setColor dullRed,show $ snd cnt," differences"] else concat [sok,"no differences"]
-    putStr $ treset
+    strPut $ if (fst cnt > 0) then asString sok ++ (show $ fst cnt) ++ " matches, " else ""
+    strPutLn $ if (snd cnt > 0) then concat [asString $ setColor dullRed,show $ snd cnt," differences"] else concat [asString sok, "no differences"]
+    strPut treset
     return $ filter (not . iseq) cc
 
 instance Ord DbProc where

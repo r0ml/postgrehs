@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 
 module Util (
   module Console,
@@ -34,26 +35,21 @@ gi y@(SqlInt32 x) = fromSql y
 
 data Comparison a = Equal a | LeftOnly a | RightOnly a | Unequal a a
 
-sok :: Text
-sok = strConcat [ setColor dullGreen,  [charCheck] ,  " "]
-nok :: Text
-nok = strConcat [setColor dullRed, setAttr bold, [charNotEquals], " "]
-
-trim :: Text -> Text
-trim [] = []
-trim x@(a:y) = if (isSpace a) then trim y else x
+sok :: ByteString
+sok = strConcat [ setColor dullGreen,  stringleton (asByte charCheck) ,  " "]
+nok :: ByteString
+nok = strConcat [setColor dullRed, setAttr bold, stringleton (asByte charNotEquals), " "]
 
 compareIgnoringWhiteSpace :: Text -> Text -> Bool
-compareIgnoringWhiteSpace x y = ciws (trim x) (trim y)
+compareIgnoringWhiteSpace x y = ciws (stripStart x) (stripStart y)
   where ciws x y =
           let a = strHead x
               b = strHead y
               p = strTail x
               q = strTail y
-           in if (isSpace a && isSpace b) then ciws (stripStart p) (stripStart q) else
+           in if (strNull (stripStart x) && strNull (stripStart y)) then True else
+              if (isSpace a && isSpace b) then ciws (stripStart p) (stripStart q) else
               if (a == b) then ciws p q else False
-        ciws x [] = strNull (stripStart x)
-        ciws [] y = strNull (stripStart y)
 
 count x a = foldl (flip ((+) . fromEnum . x)) 0 a
 dcount x y = foldl (\(a,b) z -> if (x z) then (a+1,b) else (a,b+1)) (0,0) y 

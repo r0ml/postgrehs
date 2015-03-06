@@ -15,7 +15,7 @@ import Console
 -- import Prelude hiding (pi)
 import Data.Array ( (!), listArray)
 -- import Data.String (fromString)
--- import Data.List (isSuffixOf)
+import Data.List as DL (isSuffixOf)
 -- import Debug.Trace
 
 data WhichInput = First | Second | Both deriving (Show, Eq)
@@ -88,10 +88,11 @@ coalesce x = reverse . snd $ coalzip (x,[])
 backspace (a, b:c) = (b : a, c)
 backspace (a, []) = (a,[])
 
+xchng :: Eq a =>  DiffOperation a -> [DiffOperation a]
 xchng a@(Change ls lc rs rc) =
   let rl = length rc
       ll = length lc
-  in if rc `isSuffixOf` lc then [Deletion ls (take (length lc - rl) lc) rs 
+  in if rc `DL.isSuffixOf` lc then [Deletion ls (take (length lc - rl) lc) rs 
             , Unchanged (ls+ll-rl) (drop (ll - rl) lc) rs rc]
      else [a]
 
@@ -124,7 +125,7 @@ coalzip (a:b,z) = coalzip (b, a : z)
 coalzip ([],z) = ([],z)
 
 prettyLines :: Char -> [Text] -> Text
-prettyLines start lins = concatMap (\x -> fromString [start,' ']++x++ "\n") lins
+prettyLines start lins = strConcat $ map (\x -> strConcat [ strCons start " ",x,"\n"]) lins
 
 type LineNo = Int
 
@@ -140,14 +141,14 @@ data DiffOperation a = Deletion LineNo [a] LineNo
   | Change LineNo [a] LineNo [a]
   | Unchanged LineNo [a] LineNo [a]
 
-instance Show (DiffOperation String) where
+instance Show (DiffOperation Text) where
   show (Deletion ls lc rs) =
-    concat [show (LineRange ls (length lc)), "d", show rs,"\n", prettyLines '<' lc]
+   concat [show (LineRange ls (length lc)), "d", show rs,"\n", asString $ prettyLines '<' lc]
   show (Addition rs rc ls) =
-    concat[ show ls, "a" , show (LineRange rs (length rc)), "\n", prettyLines '>' rc]
+    concat[ show ls, "a" , show (LineRange rs (length rc)), "\n", asString $ prettyLines '>' rc]
   show (Change ls lc rs rc) =
     concat [ show (LineRange ls (length lc) ), "c" , show (LineRange rs (length rc)), "\n",
-       prettyLines '<' lc, "---\n", prettyLines '>' rc ]
+       asString $ prettyLines '<' lc, "---\n", asString $ prettyLines '>' rc ]
   show (Unchanged ls lc rs rc) = ""
 --      concat [ show (lrNumbers inLeft), "c" , show (lrNumbers inRight), "\n",
 --         prettyLines '<' (lrContents inLeft), "---\n", prettyLines '>' (lrContents inRight) ]
@@ -156,8 +157,8 @@ bgColor :: Int
 bgColor = 15 
 
 instance Show (DiffOperation Char) where
-  show (Deletion ls lc rs) = concat[ peach, setExtendedBackgroundColor bgColor, lc, treset]
-  show (Addition rs rc ls) = concat[ azure, setExtendedBackgroundColor bgColor, rc, treset]
+  show (Deletion ls lc rs) = concat [asString peach, asString $ setExtendedBackgroundColor bgColor, lc, asString treset]
+  show (Addition rs rc ls) = asString $ strConcat[ asString azure, asString $ setExtendedBackgroundColor bgColor, rc, asString treset]
   show (Change ls lc rs rc) =
-    concat [ setExtendedBackgroundColor bgColor, setColor dullBlack, "{", peach, lc, azure, rc, setColor dullBlack, "}", treset ]
+    asString $ strConcat [ asString $ setExtendedBackgroundColor bgColor, asString $  setColor dullBlack, "{", asString peach, lc, asString azure, asString rc, asString $ setColor dullBlack, "}", asString treset ]
   show (Unchanged ls lc rs rc) = lc

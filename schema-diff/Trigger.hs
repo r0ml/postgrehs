@@ -53,12 +53,12 @@ mkdbt (s : r : n : t : e : p : src : _ ) = DbTrigger {
 }
 
 instance Show (Comparison DbTrigger) where
-    show (Equal x) = concat [sok, showTrigger x,  treset]
-    show (LeftOnly a) = concat [azure, [charLeftArrow]," ", showTrigger a, treset]
-    show (RightOnly a) = concat [peach, [charRightArrow], " ", showTrigger a,  treset]
-    show (Unequal a b) = concat [nok, showTrigger a,  treset, 
+    show (Equal x) = concat [asString sok, asString $ showTrigger x, asString treset]
+    show (LeftOnly a) = concat [asString azure, stringleton charLeftArrow," ", asString $ showTrigger a, asString treset]
+    show (RightOnly a) = concat [asString peach, stringleton charRightArrow, " ", asString $ showTrigger a,  asString treset]
+    show (Unequal a b) = concat [asString nok, asString $ showTrigger a,  asString treset, 
          if compareIgnoringWhiteSpace (definition a) (definition b) then ""
-            else concat [setAttr bold,"\n  definition differences: \n", treset, concatMap show $ diff (definition a) (definition b)]
+            else concat [asString $ setAttr bold,"\n  definition differences: \n", asString treset, concatMap show $ diff (asString (definition a)) (asString (definition b))]
          ]
 
 instance Comparable DbTrigger where
@@ -87,9 +87,9 @@ compareTriggers (get1, get2) = do
 
     let cc = dbCompare a b
     let cnt = dcount iseq cc
-    putStr $ if fst cnt > 0 then sok ++ show (fst cnt) ++ " matches, " else ""
-    putStrLn $ if snd cnt > 0 then concat [setColor dullRed,show $ snd cnt," differences"] else concat [sok,"no differences"]
-    putStr treset
+    putStr $ if fst cnt > 0 then asString sok ++ show (fst cnt) ++ " matches, " else ""
+    putStrLn $ if snd cnt > 0 then concat [asString $ setColor dullRed,show $ snd cnt," differences"] else concat [asString sok,"no differences"]
+    putStr (asString treset)
     return $ filter (not . iseq) cc
 
 showTrigger x = strConcat [schema x, ".", relation x, "." , name x]

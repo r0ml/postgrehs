@@ -2,13 +2,14 @@
 
 import System.Environment (getArgs)
 import PostgreSQL
+import Preface
 
 import Str
 
 main = do
     (cs : args) <- getArgs
  
-    conn <- connectToDb cs
+    conn <- connectToDb (asText cs)
 
     let get1 x = doQuery conn (Query x)
 

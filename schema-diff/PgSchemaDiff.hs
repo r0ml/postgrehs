@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances, QuasiQuotes, OverloadedStrings #-}
 
 import PostgreSQL
+import Preface
 import System.Environment (getArgs)
 
 -- import Acl
@@ -45,7 +46,7 @@ initialize args = do
           else return restArgs
 
     putStrLn ("Schema list = "++ show ra)
-    let searchPath = "set search_path="++ intercalate "," ra
+    let searchPath = strConcat ["set search_path=", intercalate "," ra]
     get1 searchPath >>= print
     get2 searchPath >>= print
     return (get1, get2)
@@ -60,10 +61,10 @@ initialize args = do
 main = do
   args <- getArgs
   let which = head args
-      ag = tail args
+      ag = map asText (tail args)
 
   case which of
-     "procs" -> initialize ag >>= compareProcs >>= mapM print 
+     "procs" -> initialize ag >>= compareProcs >>= mapM print
      "views" -> initialize ag >>= compareViews >>= mapM print
      "triggers" -> initialize ag >>= compareTriggers >>= mapM print
      -- "xfer" -> initialize ag >>= xferData >>= mapM print

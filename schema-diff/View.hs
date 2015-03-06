@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, FlexibleInstances #-}
+{-# LANGUAGE QuasiQuotes, FlexibleInstances, OverloadedStrings #-}
 
 module View where
 
@@ -8,8 +8,9 @@ import Util
 import Diff
 
 import PostgreSQL
+import Preface
+
 import Data.Maybe
-import qualified Data.ByteString as B
 
 	-- LEFT JOIN pg_catalog.pg_class dc ON (d.classoid=dc.oid AND dc.relname='pg_class')
 	-- LEFT JOIN pg_catalog.pg_namespace dn ON (dn.oid=dc.relnamespace AND dn.nspname='pg_catalog')
@@ -69,7 +70,7 @@ WHERE n.nspname IN (select * from unnest(current_schemas(false))) AND c.relkind 
 ORDER BY 1,2,3
 |]
 
-data DbView = DbView { schema :: String, name :: String, definition :: String, acl :: [Acl] }
+data DbView = DbView { schema :: Text, name :: Text, definition :: Text, acl :: [Acl] }
   deriving(Show)
 
 mkdbv :: [FieldValue] -> DbView
@@ -82,14 +83,14 @@ mkdbv (s : n : src : acl : _ ) = DbView {
 
 
 instance Show (Comparison DbView) where
-    show (Equal x) = concat [sok, showView x,  treset]
-    show (LeftOnly a) = concat [azure, [charLeftArrow]," ", showView a, treset]
-    show (RightOnly a) = concat [peach, [charRightArrow], " ", showView a,  treset]
-    show (Unequal a b) = concat [nok, showView a,  treset, 
+    show (Equal x) = concat [asString sok, asString $ showView x,  asString treset]
+    show (LeftOnly a) = concat [asString azure, stringleton charLeftArrow," ", asString $ showView a, asString treset]
+    show (RightOnly a) = concat [asString peach, stringleton charRightArrow, " ", asString $ showView a,  asString treset]
+    show (Unequal a b) = concat [asString nok, asString $ showView a,  asString treset, 
          -- if (acl a /= acl b) then concat[ setAttr bold, "\n  acls: " , treset, map show $ dbCompare a b] else "",
          showAclDiffs (acl a) (acl b),
          if (compareIgnoringWhiteSpace (definition a) (definition b)) then ""
-            else concat [setAttr bold,"\n  definition differences: \n", treset, concatMap show $ diff (definition a) (definition b)]
+            else concat [asString $ setAttr bold,"\n  definition differences: \n", asString treset, concatMap show $ diff (asString (definition a)) (asString (definition b))]
          ]
 
 instance Comparable DbView where
@@ -97,15 +98,16 @@ instance Comparable DbView where
     if (acl a == acl b && compareIgnoringWhiteSpace (definition a) (definition b)) then Equal a
     else Unequal a b
 
+compareViews :: (Text -> IO PgResult, Text -> IO PgResult) -> IO [Comparison DbView]
 compareViews (get1, get2) = do
-    aa <- get1 viewList
+    aa <- get1 (asText viewList)
 
     let (ResultSet _ aa1 _) = aa
     -- aac <- get1 viewColumns
     -- aat <- get1 viewTriggers
     -- aar <- get1 viewRules
 
-    bb <- get2 viewList
+    bb <- get2 (asText viewList)
     let (ResultSet _ bb1 _ ) = bb
     -- bbc <- get2 viewColumns
     -- bbt <- get2 viewTriggers
@@ -116,13 +118,13 @@ compareViews (get1, get2) = do
 
     let cc = dbCompare a b
     let cnt = dcount iseq cc
-    putStr $ if (fst cnt > 0) then sok ++ (show $ fst cnt) ++ " matches, " else ""
-    putStrLn $ if (snd cnt > 0) then concat [setColor dullRed,show $ snd cnt," differences"] else concat [sok,"no differences"]
-    putStr $ treset
+    putStr $ if (fst cnt > 0) then asString sok ++ (show $ fst cnt) ++ " matches, " else ""
+    putStrLn $ if (snd cnt > 0) then concat [asString $ setColor dullRed,show $ snd cnt," differences"] else concat [asString sok,"no differences"]
+    strPut treset
     return $ filter (not . iseq) cc
 
-showView :: DbView -> String
-showView x = (schema x) ++ "." ++ (name x) 
+showView :: DbView -> Text
+showView x = strConcat [schema x,  ".", name x]
 
 instance Ord DbView where
   compare a b = let hd p = map ($ p) [schema, name] in compare (hd a) (hd b)
