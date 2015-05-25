@@ -1,26 +1,17 @@
-{-# LANGUAGE OverloadedStrings, FlexibleInstances, TypeSynonymInstances, OverlappingInstances #-}
+{-# LANGUAGE OverloadedStrings, FlexibleInstances, TypeSynonymInstances #-}
 
 module PostgreSQL (connectToDb, sendQuery, doQuery, getNextResult,
-                   Postgres(..), PgMessage(..), PgResult(..),
+                   Postgres, PgMessage(..), PgResult(..),
                    FieldValue, stringField, intField, boolField,
                    PgValue, fromPg
                   )
 where
 
-import Preface
-import MD5
+import Preface.R0ml hiding(try)
 
 import Text.ParserCombinators.Parsec hiding ((<|>))
 
--- import qualified Network.Socket.ByteString as S (recv, send)
--- import qualified Network.Socket as S (sClose, Socket(..),
---   addrAddress, connect, defaultProtocol, SocketType(..), Family(..), getAddrInfo, defaultHints,
---   socket, addrSocketType, addrFamily ) 
-
--- import qualified Data.ByteString.Lazy as BL (toStrict)
 import qualified Data.ByteString.Builder as BB
-
-import qualified Data.ByteString as B (split)
 
 -- | this has the connectivity channels and the result from the connection attempt (so one can tell if
 --        reconnection is required)
@@ -214,7 +205,7 @@ instance Binary PgMessage where
           _ -> return $ Authentication au zilde
       'S' -> do 
           a <- getByteString (len - 5)
-          let [p,q] = B.split 0 a
+          let [p,q] = splitStr "\000" a
           return $ ParameterStatus (asText p) (asText q)
       'K' -> BackendKey <$> fmap fromIntegral getWord32be <*> fmap fromIntegral getWord32be
       'Z' -> ReadyForQuery . chr . fromIntegral <$> getWord8
@@ -261,7 +252,7 @@ instance Binary PgMessage where
   put Sync = putByte 'S' >> putWord32be 4
   put Flush = putByte 'H' >> putWord32be 4
   put SSLRequest = putByte 'F' >> putWord32be 8 >> putWord32be 80877103
-  put (Password p u b) = let rp = strCat ["md5", stringMD5 $ md5 ( strCat [ stringMD5 $ md5 (strCat [asByteString p, asByteString u]), b] )] 
+  put (Password p u b) = let rp = strCat ["md5" , asByteString . stringDigest $ md5 ( strCat [ asByteString . stringDigest $ md5 (strCat [asByteString p, asByteString u]), b] )] 
                           in putByte 'p' >> putWord32be ( fromIntegral (strLen rp + 5)) >> putByteString rp >> zero
 
 {- -- considered legacy
@@ -511,7 +502,7 @@ connectToDb conns = do
     let [h,p,un,db]=glx conns
         pk = read (asString p) :: Int
     pw <- fmap (fromMaybe "") (passwordFromPgpass h pk db un)
-    let smp = [("user", un),("database",db)]
+    let smp = [("user" :: String, un),("database",db)]
 
     rr <- connectTo (PgConnInfo conns h pk db un pw)
     conn <- newIORef rr
@@ -533,8 +524,8 @@ reconnect conn = do
 
       let hints = defaultHints {addrFamily = AF_INET, addrSocketType = Stream}
       addrInfos <- getAddrInfo (Just hints) (Just (asString host)) (Just $ show port)
-      connq <- catch (sktConnect sock (addrAddress $ head addrInfos) >> return True )
-                     (\x -> printMsg (show (x::SomeException)) >> return False)
+      _connq <- catch (sktConnect sock (addrAddress $ head addrInfos) >> return True )
+                     (\j -> printMsg (show (j::SomeException)) >> return False)
 
       p1 <- forkIO $ doUntil $ sendReq qs sock
       p2 <- forkIO $ doUntil $ processResponse qr sock (un,pwd)
@@ -548,7 +539,7 @@ reconnect conn = do
     _ -> return prp
 
 connectTo :: PgConnInfo -> IO PostgresR -- host port path headers 
-connectTo ci@(PgConnInfo _ host port db uid pwd) = do
+connectTo ci@(PgConnInfo _ _host _port _db _uid _pwd) = do
     qchan <- newChan  -- requests
     rchan <- newChan  :: IO (Chan PgMessage) -- responses
     
@@ -594,8 +585,8 @@ connectTo ci@(PgConnInfo _ host port db uid pwd) = do
                       CommandComplete s -> let z = if null oaccum then Nothing else Just $ head oaccum
                                             in return $ ResultSet z (reverse daccum) s
                       ErrorResponse r -> return $ ErrorMessage r
-                      ReadyForQuery z -> if (not . null) saccum then return $ OtherResult (reverse saccum)
-                                                                else getResults x g
+                      ReadyForQuery _z -> if (not . null) saccum then return $ OtherResult (reverse saccum)
+                                                                 else getResults x g
                       -- do
 --                        (bs, cc) <- unfoldWhile (getDataRow x)
 --                        let cx = case cc of { CommandComplete z -> z; _ -> show cc }
@@ -616,7 +607,7 @@ keyval = do
 dlml :: CharParser () [Text]
 dlml = do
   z <- many keyval
-  let u = asText (unsafePerformIO (getEnv "USER"))
+  let u = asText (unsafePerformIO (fromJust <$> lookupEnv "USER"))
       a = lookupWithDefault "localhost" "host" z
       b = lookupWithDefault "5432" "port" z
       c = lookupWithDefault u "user" z
@@ -636,7 +627,7 @@ glx x =
 
 --------------------------------------------------------------------------------
 -- pgpass support
-xtail :: Stringy a b => a -> a
+xtail :: Stringy a => a -> a
 xtail x = if strNull x then x else strTail x
 
 parsePgpassLine :: Text -> (Text,Int,Text,Text,Text)
@@ -659,7 +650,7 @@ passwordFromPgpass :: Text -> Int -> Text -> Text -> IO (Maybe Text)
 passwordFromPgpass h p dn uid = do
     hm <- getHomeDirectory
     a <- strReadFile (hm </> ".pgpass")
-    let b = map parsePgpassLine (filter valine (split '\n' a))
+    let b = map parsePgpassLine (filter valine (splitStr ("\n" :: Text) a))
     let c = filter (pgmatch h p dn uid) b
     return (if null c then Nothing else let (_,_,_,_,r) = head c in Just r)
   where pgmatch k w dx u (k',w',dx',u',_) = k' == k && w' == w && ( dx' == "*" || dx' == dx ) && u' == u

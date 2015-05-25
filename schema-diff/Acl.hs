@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances, OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Acl (
   cvtacl,
@@ -8,7 +9,7 @@ module Acl (
 where
 
 import PostgreSQL
-import Preface
+import Preface.R0ml
 import Util
 import Data.List (sort, (\\))
 -- import Data.List

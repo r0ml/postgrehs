@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Util (
   module Console,
@@ -8,7 +9,7 @@ module Util (
 where
 
 import PostgreSQL
-import Preface
+import Preface.R0ml
 import Console
 
 gs :: PgResult -> Text

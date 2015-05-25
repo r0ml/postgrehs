@@ -2,13 +2,12 @@
 
 module View where
 
-import Str(str)
 import Acl
 import Util
 import Diff
 
 import PostgreSQL
-import Preface
+import Preface.R0ml
 
 import Data.Maybe
 

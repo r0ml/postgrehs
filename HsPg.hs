@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import PostgreSQL as PG
-import Preface
+import Preface.R0ml
 
 main :: IO ()
 main = do

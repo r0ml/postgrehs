@@ -1,14 +1,14 @@
 {-# LANGUAGE QuasiQuotes, FlexibleInstances, OverloadedStrings #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 
 module Table where
 
-import Str(str)
 import Acl
 import Util
 import Diff
 
 import PostgreSQL
-import Preface
+import Preface.R0ml
 import Data.Maybe
 
 tblList :: String
@@ -204,6 +204,7 @@ compareTables (get1, get2) = do
     strPut treset
     return $ filter (not . iseq) cc
 
+showTable :: DbTable -> Text
 showTable x = strConcat [schema x, ".", name x]
 
 instance Ord DbTable where

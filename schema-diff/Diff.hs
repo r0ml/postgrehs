@@ -10,10 +10,10 @@ module Diff (
   diff
 ) where
 
-import Preface
+import Preface.R0ml hiding ((!))
 import Console
 -- import Prelude hiding (pi)
-import Data.Array ( (!), listArray)
+import Data.Array (  (!), listArray)
 -- import Data.String (fromString)
 import Data.List as DL (isSuffixOf)
 -- import Debug.Trace

@@ -1,13 +1,10 @@
 {-# LANGUAGE QuasiQuotes, OverloadedStrings #-}
 
-import System.Environment (getArgs)
 import PostgreSQL
-import Preface
-
-import Str
+import Preface.R0ml
 
 main = do
-    (cs : args) <- getArgs
+    (cs : _) <- getArgs
  
     conn <- connectToDb (asText cs)
 

@@ -3,8 +3,7 @@
 module Proc where
 
 import PostgreSQL
-import Preface
-import Str(str)
+import Preface.R0ml
 import Acl
 import Util
 import Diff
@@ -62,7 +61,7 @@ instance Show (Comparison DbProc) where
        if (resType a /= resType b) then concat [asString $ setAttr bold,"\n  resultTypes: ", asString treset, asString $ resType a, asString neq , asString $ resType b] else "",
        -- if (acl a /= acl b) then concat[ setAttr bold, "\n  acls: " , treset, intercalate ", " $ acl a, neq,  intercalate ", " $ acl b] else "",
        if (compareIgnoringWhiteSpace (source a) (source b)) then ""
-          else concat [asString $ setAttr bold,"\n  source differences: \n", asString treset, concatMap show $ diff (split '\n' $ source a) (split '\n' $  source b)]
+          else concat [asString $ setAttr bold,"\n  source differences: \n", asString treset, concatMap show $ diff (splitStr "\n" $ source a) (splitStr "\n" $  source b)]
        ]
 
 instance Comparable DbProc where

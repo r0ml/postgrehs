@@ -1,8 +1,7 @@
 {-# LANGUAGE FlexibleInstances, QuasiQuotes, OverloadedStrings #-}
 
 import PostgreSQL
-import Preface
-import System.Environment (getArgs)
+import Preface.R0ml
 
 -- import Acl
 import Proc
@@ -11,16 +10,6 @@ import Table
 -- import XferData
 -- import UDT
 import Trigger
-import Util
--- import qualified MD5 
--- import qualified Crypto.Hash.MD5 as MD5
--- import MD5
-
-import Str
-
--- import qualified Data.ByteString as B
--- import qualified Data.Text.Encoding as T
--- import qualified Data.Text as T
 
 schemaList = [str|
 SELECT n.nspname AS "Name"
@@ -30,7 +19,7 @@ WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
 ORDER BY 1;
 |]
 
-
+initialize :: [Text] -> IO (Text -> IO PgResult, Text -> IO PgResult) 
 initialize args = do
     let (conns1 : conns2 : restArgs ) = args
 
@@ -58,19 +47,20 @@ initialize args = do
    4) the list of schemas to compare
 -}
 
+main :: IO ()
 main = do
   args <- getArgs
   let which = head args
       ag = map asText (tail args)
 
   case which of
-     "procs" -> initialize ag >>= compareProcs >>= mapM print
-     "views" -> initialize ag >>= compareViews >>= mapM print
-     "triggers" -> initialize ag >>= compareTriggers >>= mapM print
+     "procs" -> initialize ag >>= compareProcs >>= mapM_ print
+     "views" -> initialize ag >>= compareViews >>= mapM_ print
+     "triggers" -> initialize ag >>= compareTriggers >>= mapM_ print
      -- "xfer" -> initialize ag >>= xferData >>= mapM print
-     "tables" -> initialize ag >>= compareTables >>= mapM print
+     "tables" -> initialize ag >>= compareTables >>= mapM_ print
      -- "types" -> initialize ag >>= compareTypes >>= mapM print
-     _ -> mapM putStr [ [str|
+     _ -> mapM_ putStr [ [str|
 The valid comparisons are: procs, views, triggers, tables, types
 
 The arguments are:
