@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, FlexibleInstances, TypeSynonymInstances #-}
 
-module PostgreSQL (connectToDb, sendQuery, doQuery, getNextResult,
+module PostgreSQL (connectToDb, disconnect, sendQuery, doQuery, getNextResult,
                    Postgres, PgMessage(..), PgResult(..),
                    FieldValue, stringField, intField, boolField,
                    PgValue, fromPg
@@ -11,12 +11,10 @@ import Preface.R0ml hiding(try)
 
 import Text.ParserCombinators.Parsec hiding ((<|>))
 
-import qualified Data.ByteString.Builder as BB
-
 -- | this has the connectivity channels and the result from the connection attempt (so one can tell if
 --        reconnection is required)
 data PostgresR = PostgresR PostgresX PgResult (ThreadId, Chan PgMessage) (ThreadId, Chan PgMessage)
-type Postgres = IORef PostgresR
+type Postgres = IORef (Maybe PostgresR)
                        
 data PostgresX = PostgresX { pgSend :: Chan PgQuery, pgRecv :: Chan PgResult,
                              pgConnInfo :: PgConnInfo }
@@ -152,108 +150,97 @@ printMsg x = putStrLn (csi [38, 2, 20, 20, 20 :: Int] "m" ++ x ++ treset)
   where treset = "\ESC[m"
         csi args code = concat ["\ESC[", intercalate ";" (map show args), code]
   
-getFieldData :: Int -> Get (Maybe ByteString)
-getFieldData _n = do
-  a <- getInt32
-  if a == -1 then return Nothing else do
-    b <- getByteString (fromIntegral a)
-    return (Just b)
+getFieldData :: ByteStream -> (ByteStream, Maybe ByteString)
+getFieldData (ByteStream s p) = let a = getInt32 p s
+  in if a == -1 then (ByteStream s (p+4), Nothing)
+     else (ByteStream s (p+4+a), Just (strTake a (strDrop (4+p) s)))
+
+getUntil0 :: ByteStream -> (ByteStream, ByteString)
+getUntil0 (ByteStream s n) =
+  case strElemIndex (0::Word8) (strDrop n s) of
+     Nothing -> (ByteStream s (strLen s), strDrop n s)
+     Just x ->  (ByteStream s (n+x+1), strTake x (strDrop n s))
+
+data ByteStream = ByteStream ByteString Integer
+
+getMessageComponent :: ByteStream -> (ByteStream,Char,Text)
+getMessageComponent (ByteStream ss nn) =
+  let n = nth ss nn
+      (bb,s) = if n == 0 then (ByteStream ss (nn+1), "")
+               else (getUntil0 (ByteStream ss (nn+1)) )
+   in (ByteStream ss (nn+strLen s+(if n == 0 then 1 else 2)), chr (fromIntegral n) , asText s )
     
+getMessageComponents :: ByteStream -> (ByteStream, [(Char, Text)])
+getMessageComponents bs = getMessageComponents' bs []
+  where getMessageComponents' :: ByteStream -> [(Char,Text)] -> (ByteStream, [(Char, Text)])
+        getMessageComponents' bs a = 
+            let (b, c, z) = getMessageComponent bs
+             in if c == '\0' then (b, a) else getMessageComponents' b ((c,z) : a)
 
-getUntil :: Word8 -> Get ByteString
-getUntil c = fmap (asByteString  . BB.toLazyByteString) (getUntil' c mempty)
-  where getUntil' cx a = do
-          n <- getWord8
-          if n == cx then return a else getUntil' cx (a `mappend` BB.word8 n)
+getFieldDef :: ByteStream -> (ByteStream, FieldDef)
+getFieldDef sa@(ByteStream s n) = 
+  let (ByteStream s2 v, a) = getUntil0 sa
+      b = getInt32 v s2
+      c = getInt16 (v+4) s2
+      d = getInt32 (v+6) s2
+      e = getInt16 (v+10) s2
+      f = getInt32 (v+12) s2
+      g = getInt16 (v+16) s2
+   in (ByteStream s2 (v+18), FieldDef (asText a) b c d e f g)
 
-getMessageComponent :: Get (Char,Text)
-getMessageComponent = do
-    n <- getWord8
-    s <- if n == 0 then return "" else do { b <- getUntil 0; return (asText b) } 
-    return ( chr (fromIntegral n) , s )
-    
-getMessageComponents :: Get [(Char, Text)]
-getMessageComponents = getMessageComponents' []
-  where getMessageComponents' a = do
-            c <- getMessageComponent
-            if fst c == '\0' then return a else getMessageComponents' (c : a)
+getMsg :: Char -> ByteString -> PgMessage
+getMsg 'R' s = let au = getInt32 0 s
+                in case au of
+                     0 -> Authentication 0 zilde
+                     3 -> Authentication 3 zilde
+                     5 -> let md = strTake 4 (strDrop 4 s) in Authentication 5 md
+                     _ -> Authentication au zilde
+getMsg 'S' s = let a = strTake (strLen s - 1) s  
+                   [p,q] = splitStr "\000" a
+                in ParameterStatus (asText p) (asText q)
 
-getFieldDef :: a -> Get FieldDef
-getFieldDef _n = do
-  a <- getUntil 0
-  b <- getInt32
-  c <- getInt16
-  d <- getInt32
-  e <- getInt16
-  f <- getInt32
-  g <- getInt16
-  return $ FieldDef (asText a) b c d e f g
+getMsg 'K' s = BackendKey (getInt32 0 s) (getInt32 4 s)
 
-instance Binary PgMessage where
-  get = do
-    b <- fmap (chr . fromIntegral) getWord8
-    len <- getInt32 
-    case b of 
-      'R' -> do 
-        au <- getInt32
-        case au of
-          0 -> return $ Authentication 0 zilde
-          3 -> return $ Authentication 3 zilde
-          5 -> do
-            md <- getByteString 4
-            return $ Authentication 5 md
-          _ -> return $ Authentication au zilde
-      'S' -> do 
-          a <- getByteString (len - 5)
-          let [p,q] = splitStr "\000" a
-          return $ ParameterStatus (asText p) (asText q)
-      'K' -> BackendKey <$> fmap fromIntegral getWord32be <*> fmap fromIntegral getWord32be
-      'Z' -> ReadyForQuery . chr . fromIntegral <$> getWord8
-      'T' -> do
-          flds <- getInt16 -- the number of fields
-          RowDescription <$> mapM getFieldDef [1..flds]
-      'D' -> do
-          flds <- getInt16 -- the number of fields
-          DataRow <$> mapM getFieldData [1..flds]
-      'C' -> do
-          a <- getByteString (len - 5)
-          return $ CommandComplete (asText a)
-      'V' -> FunctionResult <$> getFieldData 1
-      'E' -> ErrorResponse <$> getMessageComponents
-      '1' -> return ParseComplete
-      '2' -> return BindComplete
-      '3' -> return CloseComplete
-      'd' -> CopyData <$> getByteString (len - 4)
-      'c' -> return CopyDone
-      's' -> return PortalSuspended
-      'I' -> return EmptyQuery
-      'n' -> return NoData
-      'N' -> NoticeResponse <$> getMessageComponents
-      'A' -> do
-          prc <- fmap fromIntegral getWord32be
-          chan <- getUntil 0
-          pay <- getUntil 0
-          return (Notification prc (asText chan) (asText pay))
-      't' -> undefined -- ParameterDescription 
-      'X' -> return Terminate -- never really sent by the backend, but pseudo-sent when the socket is closed
-      _ -> undefined
+getMsg 'Z' s = (ReadyForQuery . chr . fromIntegral . strHead) s
 
-  put (Query s) = putByte 'Q' >> putStringMessage s
+getMsg 'T' s = let flds = getInt16 0 s -- the number of fields
+                in RowDescription ((take flds . snd . unzip) (iterate (\(b,n)->getFieldDef b) (getFieldDef (ByteStream s 2) )))
 
-  put (StartUpMessage a ) = do
+getMsg 'D' s = let flds = getInt16 0 s -- the number of fields
+              in DataRow ((take flds . snd . unzip) (iterate (\(b,n)->getFieldData b) (getFieldData (ByteStream s 2))))
+getMsg 'C' s = let a = strTake (strLen s - 1) s in CommandComplete (asText a)
+getMsg 'V' s = let (bs, r) = getFieldData (ByteStream s 0) in FunctionResult r
+getMsg 'E' s = let (bs, r) = getMessageComponents (ByteStream s 0) in ErrorResponse r
+getMsg '1' s = assert (strLen s == 0) ParseComplete
+getMsg '2' s = assert (strLen s == 0) BindComplete
+getMsg '3' s = assert (strLen s == 0) CloseComplete
+getMsg 'd' s = CopyData (strTake (strLen s - 1) s)
+getMsg 'c' s = assert (strLen s == 0) CopyDone
+getMsg 's' s = assert (strLen s == 0) PortalSuspended
+getMsg 'I' s = assert (strLen s == 0) EmptyQuery
+getMsg 'n' s = assert (strLen s == 0) NoData
+getMsg 'N' s = let (bs, r) = getMessageComponents (ByteStream s 0) in NoticeResponse r
+getMsg 'A' s = let prc = getInt32 0 s
+                   (ns, chan) = getUntil0 (ByteStream s 4)
+                   (ns2, pay) = getUntil0 ns2
+                in Notification prc (asText chan) (asText pay)
+getMsg 't' _s = undefined -- ParameterDescription 
+getMsg 'X' _s = Terminate -- never really sent by the backend, but pseudo-sent when the socket is closed
+getMsg _ _ = undefined
+
+putMsg :: PgMessage -> ByteString
+putMsg (Query s) = strCat [ putByte 'Q', putStringMessage s]
+
+putMsg (StartUpMessage a ) = 
      let m = concatMap (\(x,y) -> [asByteString x, asByteString y] ) a
          j = 9 + foldl (\x y -> x + 1 + strLen y) 0 m
-     int32 (fromInteger j)
-     int32 protocolVersion
-     mapM_ hString m
-     zero
-
-  put Terminate = putByte 'X' >> putWord32be 4
-  put Sync = putByte 'S' >> putWord32be 4
-  put Flush = putByte 'H' >> putWord32be 4
-  put SSLRequest = putByte 'F' >> putWord32be 8 >> putWord32be 80877103
-  put (Password p u b) = let rp = strCat ["md5" , asByteString . stringDigest $ md5 ( strCat [ asByteString . stringDigest $ md5 (strCat [asByteString p, asByteString u]), b] )] 
-                          in putByte 'p' >> putWord32be ( fromIntegral (strLen rp + 5)) >> putByteString rp >> zero
+      in strCat $ [int32 (fromInteger j), int32 protocolVersion] ++ (map hString m) ++ [zero]
+putMsg Terminate = strCat [putByte 'X', putWord32be 4]
+putMsg Sync = strCat [putByte 'S', putWord32be 4]
+putMsg Flush = strCat [putByte 'H', putWord32be 4]
+putMsg SSLRequest = strCat [ putByte 'F',  putWord32be 8, putWord32be 80877103]
+putMsg (Password p u b) = let rp = strCat ["md5" , asByteString . stringDigest $ md5 ( strCat [ asByteString . stringDigest $ md5 (strCat [asByteString p, asByteString u]), b] )] 
+                          in strCat [putByte 'p', putWord32be ( fromIntegral (strLen rp + 5)), rp, zero]
 
 {- -- considered legacy
       put (FunctionCall oid fvs) = do
@@ -267,91 +254,76 @@ instance Binary PgMessage where
     where args = asByteString (runPut (mapM_ putFieldValue fvs))
           ml = 14 + strLen args
 -}
-                        
-  put (Execute port mx) = do
-      putByte 'E'
-      putWord32be (fromIntegral ml)
-      putByteString namb
-      zero
-      putWord32be (fromIntegral mx)
+
+putMsg (Execute port mx) = 
+      strCat [putByte 'E', putWord32be (fromIntegral ml), namb, zero, 
+      putWord32be (fromIntegral mx)]
     where namb = asByteString port
           ml = 9 + strLen namb
   
-  put (Parse nam stmt dts) = do
-      putByte 'P'
-      putWord32be (fromIntegral ml)
-      putByteString namb >> zero
-      putByteString stmtb >> zero
-      putWord16be (fromIntegral (length dts))
-      mapM_ (putWord32be . fromIntegral) dts
+putMsg (Parse nam stmt dts) = strConcat ([
+      putByte 'P', putWord32be (fromIntegral ml),
+      namb, zero, stmtb, zero, putWord16be (fromIntegral (length dts))]
+      ++ map (putWord32be . fromIntegral) dts )
     where namb = asByteString nam
           stmtb = asByteString stmt
           ml = (4* length dts) + 8 + fromInteger (strLen namb + strLen stmtb)
 
-  put (Bind nam stmt vals) = do
-      putByte 'B'
-      putWord32be (fromIntegral ml)
-      putByteString namb >> zero
-      putByteString stmtb >> zero
-      putWord16be 0 -- all use text
-      putWord16be (fromIntegral (length vals))
-      putByteString args
-      putWord16be 0 -- all use text
-    where args = asByteString (runPut (mapM_ putFieldValue vals))
+putMsg (Bind nam stmt vals) = strCat ( [
+      putByte 'B', putWord32be (fromIntegral ml),
+      namb, zero, stmtb, zero, 
+      putWord16be 0, -- all use text
+      putWord16be (fromIntegral (length vals))] ++ 
+      args ++ [ putWord16be 0 ]) -- all use text
+    where args = map putFieldValue vals
           namb = asByteString nam
           stmtb = asByteString stmt
-          ml = strLen namb + strLen stmtb + 12 + strLen args
+          ml = strLen namb + strLen stmtb + 12 + (sum (map strLen args))
   
-  put (CancelRequest prc key) = do
-      putByte 'F'
-      putWord32be 16
-      putWord32be 80877102
-      putWord32be (fromIntegral prc)
-      putWord32be (fromIntegral key)
+putMsg (CancelRequest prc key) = 
+  strConcat [ putByte 'F', putWord32be 16, 
+      putWord32be 80877102, putWord32be (fromIntegral prc),
+      putWord32be (fromIntegral key)]
   
-  put (ClosePortal x) = dcp 'C' 'P' x
-  put (CloseStatement x) = dcp 'C' 'S' x
+putMsg (ClosePortal x) = dcp 'C' 'P' x
+putMsg (CloseStatement x) = dcp 'C' 'S' x
 
-  put (CopyData x) = undefined
+putMsg (CopyData x) = undefined
   
-  put CopyDone = putByte 'c' >> putWord32be 4
+putMsg CopyDone = strConcat [ putByte 'c' ,  putWord32be 4 ]
   
-  put (CopyFail x) = do
-      putByte 'f'
-      putWord32be (fromIntegral ml)
-      putByteString a >> zero
+putMsg (CopyFail x) = strConcat [
+      putByte 'f', putWord32be (fromIntegral ml),  a, zero]
     where a = asByteString x
           ml = strLen a + 5
   
-  put (DescribePortal x) = dcp 'D' 'P' x
-  put (DescribeStatement x) = dcp 'D' 'S' x
+putMsg (DescribePortal x) = dcp 'D' 'P' x
+putMsg (DescribeStatement x) = dcp 'D' 'S' x
     
-  put _ = undefined
+putMsg _ = undefined
 
-putStringMessage :: Text -> Put
-putStringMessage s = do
+putStringMessage :: Text -> ByteString
+putStringMessage s = 
   let sb = asByteString s
-  putWord32be ( fromIntegral (strLen sb + 5))
-  putByteString sb
-  zero
+      len = putWord32be ( fromIntegral (strLen sb + 5))
+   in strConcat [len, sb, zero]
 
-putFieldValue :: Maybe ByteString -> Put
+zero :: ByteString
+zero = stringleton (0::Word8)
+
+putByte :: Char -> ByteString
+putByte = stringleton . fromIntegral . fromEnum
+
+putFieldValue :: Maybe ByteString -> ByteString
 putFieldValue fv = case fv of 
     Nothing -> putWord32be (fromIntegral (-1 :: Int))
-    Just b -> putWord32be (fromIntegral (strLen b)) >> putByteString b
+    Just b -> strConcat [ putWord32be (fromIntegral (strLen b)) , b ]
 
-putByte :: Char -> Put
-putByte = putWord8 . fromIntegral . ord
-
-dcp :: Char -> Char -> Text -> Put
-dcp a b x = do
-  putByte a
+-- describe portal
+dcp :: Char -> Char -> Text -> ByteString
+dcp a b x = 
   let nam = asByteString x
-  putWord32be (fromIntegral (6 + strLen nam))
-  putByte b
-  putByteString nam
-  zero
-
+   in strConcat [ putByte a, putWord32be (fromIntegral (6 + strLen nam)), putByte b, nam, zero]
 
 -- | A field size.
 data Size = Varying | Size Int16
@@ -461,34 +433,48 @@ readResponse :: Socket -> IO PgMessage
 readResponse s = do
     more <- catch (reallyRead s 5) ( (\x -> do {printMsg (show x) ; return zilde} ) :: SomeException -> IO ByteString) 
     if strNull more then return Terminate
-    else do msg <- reallyRead s ( runGet getInt32 (asLazyByteString (strTail more)) - 4 )
-            return $ runGet get (asLazyByteString (strCat [more, msg]))
+    else do msg <- reallyRead s (( getInt32 1 more ) - 4 )
+            return $ getMsg ( (chr . fromEnum) (strHead more)) msg
 
 protocolVersion :: Int
 protocolVersion = 0x30000
 
 -- | Put a Haskell string, encoding it to UTF-8, and null-terminating it.
-hString :: ByteString -> Put
-hString s = putByteString s >> zero
+hString :: ByteString -> ByteString
+hString s = strAppend s zero
 
 -- | Put a Haskell 32-bit integer.
-int32 :: Int -> Put
+int32 :: Int -> ByteString 
 int32 = putWord32be . fromIntegral 
 
--- | Put zero-byte terminator.
-zero :: Put
-zero = putWord8 0
+getWord32be :: Integer -> ByteString -> Int32
+getWord32be n s = (fromIntegral (nth s n) `shiftL` 24) .|.
+              (fromIntegral (nth s (n+1) ) `shiftL` 16) .|.
+              (fromIntegral (nth s (n+2) ) `shiftL`  8) .|.
+              (fromIntegral (nth s (n+3) ))
 
-getInt32 :: Get Int
-getInt32 = fmap fromIntegral (fmap fromIntegral getWord32be :: Get Int32)
+getWord16be :: Integer -> ByteString -> Int16
+getWord16be n s = (fromIntegral (nth s n) `shiftL` 8) .|.
+              (fromIntegral (nth s (n+1) ))
 
-getInt16 :: Get Int
-getInt16 = fmap fromIntegral (fmap fromIntegral getWord16be :: Get Int16)
+getInt32 :: Integral a => Integer -> ByteString -> a
+getInt32 = (fromIntegral .) . getWord32be
 
+getInt16 :: Integral a => Integer -> ByteString -> a
+getInt16 = (fromIntegral .) . getWord16be
+
+putWord32be :: Int32 -> ByteString
+putWord32be w = pack [(fromIntegral (shiftR w 24) ) ,
+                      (fromIntegral (shiftR w 16) ) ,
+                      (fromIntegral (shiftR w  8) ) ,
+                      (fromIntegral w) ]
+
+putWord16be :: Int16 -> ByteString
+putWord16be w = pack [(fromIntegral (shiftR w 8)), fromIntegral w]
 
 -- | Send a block of bytes on a handle, prepending the complete length.
-sendBlock :: Binary a => Socket -> a -> IO ()
-sendBlock h outp = sendAll h (asByteString (runPut (put outp)))
+sendBlock :: Socket -> PgMessage -> IO ()
+sendBlock h outp = sendAll h (asByteString (putMsg outp))
   where sendAll j msg = do
            n <- sktSend j msg
            if n <= 0 then error "failed to send"
@@ -505,13 +491,23 @@ connectToDb conns = do
     let smp = [("user" :: String, un),("database",db)]
 
     rr <- connectTo (PgConnInfo conns h pk db un pw)
-    conn <- newIORef rr
+    conn <- newIORef (Just rr)
     reconnect conn -- try to connect now -- earlier error message potential
     return conn
 
+disconnect :: Postgres -> IO ()
+disconnect conn = do
+  a <- readIORef conn
+  case a of 
+     Nothing -> return ()
+     Just (PostgresR px pgr (ps, qs) (pr,qr)) -> do
+          killThread ps
+          killThread pr
+          writeIORef conn Nothing
+
 reconnect :: Postgres -> IO PostgresR
 reconnect conn = do
-  prp@(PostgresR px pgr (ps,qs) (pr,qr)) <- readIORef conn
+  prp@(Just (PostgresR px pgr (ps,qs) (pr,qr))) <- readIORef conn
   case pgr of
     EndSession -> do
       killThread ps
@@ -534,9 +530,9 @@ reconnect conn = do
       res <- readChan x
       printMsg ("Connection: "++ show res)
       let wr = PostgresR px res (p1, qs) (p2, qr)
-      writeIORef conn wr
+      writeIORef conn (Just wr)
       return wr
-    _ -> return prp
+    _ -> return (fromJust prp)
 
 connectTo :: PgConnInfo -> IO PostgresR -- host port path headers 
 connectTo ci@(PgConnInfo _ _host _port _db _uid _pwd) = do
@@ -586,7 +582,7 @@ connectTo ci@(PgConnInfo _ _host _port _db _uid _pwd) = do
                                             in return $ ResultSet z (reverse daccum) s
                       ErrorResponse r -> return $ ErrorMessage r
                       ReadyForQuery _z -> if (not . null) saccum then return $ OtherResult (reverse saccum)
-                                                                 else getResults x g
+                                                                 else return $ OtherResult (reverse saccum) -- getResults x g
                       -- do
 --                        (bs, cc) <- unfoldWhile (getDataRow x)
 --                        let cx = case cc of { CommandComplete z -> z; _ -> show cc }

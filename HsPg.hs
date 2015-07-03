@@ -19,7 +19,7 @@ main = do
     f <- sendQuery conn (Bind "clem" "stm" [Just $ asByteString a2])
     print f
     
-    g <- doQuery conn (Execute "clem" 3)
+    g <- doQuery conn (Execute "clem" 0) -- number of rows to return
     print g
     
     print =<< sendQuery conn (ClosePortal "clem")
@@ -27,6 +27,11 @@ main = do
 
     print =<< doQuery conn Sync 
 
+    -- print "disconnect?"
+
+    -- disconnect conn
+    
+    -- print "done"
 
 --    threadDelay 10000000
 
