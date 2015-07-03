@@ -9,8 +9,6 @@ where
 
 import Preface.R0ml hiding(try)
 
-import Text.ParserCombinators.Parsec hiding ((<|>))
-
 -- | this has the connectivity channels and the result from the connection attempt (so one can tell if
 --        reconnection is required)
 data PostgresR = PostgresR PostgresX PgResult (ThreadId, Chan PgMessage) (ThreadId, Chan PgMessage)
@@ -85,35 +83,21 @@ instance PgValue Bool where
   fromPg = (== "t") . asString . fromMaybe "f" 
 
 instance PgValue a => PgValue [a] where
-  fromPg x = let y = parse tpl "" (maybe "" asString x) in case y of { Left z -> error (show z); Right z -> map (fromPg . Just . asByteString) z } 
+  fromPg (Just x) = map (fromPg . Just . asByteString) (tpl (asText x)) 
+  fromPg Nothing = undefined 
 
-dquote :: Parser Char
-dquote = char '"' <?> "double quote"
+quoted_string :: Text -> (Text, Text)
+quoted_string t = let Just z = strElemIndex '"' (strDrop 1 t)
+                   in if 2+z >= strLen t || '"' /= strHead (strDrop (2+z) t)
+                           then (strTake z (strDrop 1 t), strDrop (2+z) t)
+                           else let (rq, rs) = quoted_string (strDrop (2+z) t)
+                                 in (strCat [strTake z (strDrop 1 t), rq], rs) 
 
-quoted_char :: Parser Char
-quoted_char = try ( char '\\' >> char '\\' >> return '\\' ) <|>
-              try ( char '"' >> char '"' >> return '"') <?> "not quoted char"
-                 
-qtext :: Parser Text
-qtext = fmap asText (many( quoted_char <|> noneOf "\""))
-
-quoted_string :: Parser Text
-quoted_string = do 
-      _ <- dquote
-      r <- qtext
-      _ <- dquote
-      return r
-  <?> "quoted string"
-
-qst :: Parser Text
-qst = quoted_string <|> fmap asText (many (noneOf ",)")) <?> fail "qst error"
-
-tpl :: Parser [Text]
-tpl = do 
-  _ <- char '('
-  t <- sepBy qst (char ',')
-  _ <- char ')'
-  return t
+tpl :: Text -> [Text]
+tpl t = let t1 = strTail t -- first char is '(' or ','
+            (t2,t3) = if strHead t1 == '"' then quoted_string t1
+                      else strBreak (\x -> x ==',' || x == ')') t1
+         in if strNull t1 || strHead t1 == ')' then [] else t2 : tpl t3
 
 -- need to handle quoted strings (from Acl.hs)
 
@@ -485,7 +469,7 @@ sendBlock h outp = sendAll h (asByteString (putMsg outp))
 
 connectToDb :: Text -> IO Postgres
 connectToDb conns = do
-    let [h,p,un,db]=glx conns
+    let [h,p,un,db]= dlml conns
         pk = read (asString p) :: Int
     pw <- fmap (fromMaybe "") (passwordFromPgpass h pk db un)
     let smp = [("user" :: String, un),("database",db)]
@@ -591,35 +575,21 @@ connectTo ci@(PgConnInfo _ _host _port _db _uid _pwd) = do
 
 --------------------------------------------------------------------------------
 -- Connection String
-keyval :: Parser (Text,Text)
-keyval = do
-  _ <- spaces
-  a <- fmap asText (many1 alphaNum)
-  _ <- char '=' <|> char ':'
-  b <- fmap asText (many1 (noneOf " "))
-  _ <- spaces
-  return (a,b)
+kvpairs :: Text -> [(Text,Text)]
+kvpairs t = let t1 = stripStart t
+                (n,r) = strBreak isSpace t1
+                (k,v) = strBreak (\x -> x == '=' || x == ':') n
+             in if strNull t1 then [] else (asText k, asText (strDrop 1 v)) : kvpairs r
 
-dlml :: CharParser () [Text]
-dlml = do
-  z <- many keyval
-  let u = asText (unsafePerformIO (fromJust <$> lookupEnv "USER"))
+dlml :: Text -> [Text]
+dlml x =
+  let z = kvpairs x
+      u = asText (unsafePerformIO (fromJust <$> lookupEnv "USER"))
       a = lookupWithDefault "localhost" "host" z
       b = lookupWithDefault "5432" "port" z
       c = lookupWithDefault u "user" z
       d = lookupWithDefault "" "dbname" z
-  
-  return [a,b,c,d]
-
-
-
-
-glx :: Text -> [Text]
-glx x =
-  let z = parse dlml "" (asString x)
-  in case z of 
-     Right y -> y
-     Left y -> error (show y)
+   in [a,b,c,d]
 
 --------------------------------------------------------------------------------
 -- pgpass support

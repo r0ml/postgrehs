@@ -7,7 +7,7 @@ Synopsis:       Support for Postgres database (driver and utilities)
 Build-Type:     Simple
 
 Library
-  Build-Depends:  preface-r0ml, base, parsec
+  Build-Depends:  preface-r0ml, base
   Ghc-options:    -Wall
   Hs-Source-Dirs: .
   Default-Language: Haskell2010
