@@ -145,7 +145,7 @@ getUntil0 (ByteStream s n) =
      Nothing -> (ByteStream s (strLen s), strDrop n s)
      Just x ->  (ByteStream s (n+x+1), strTake x (strDrop n s))
 
-data ByteStream = ByteStream ByteString Integer
+data ByteStream = ByteStream ByteString Int
 
 getMessageComponent :: ByteStream -> (ByteStream,Char,Text)
 getMessageComponent (ByteStream ss nn) =
@@ -218,7 +218,7 @@ putMsg (Query s) = strCat [ putByte 'Q', putStringMessage s]
 putMsg (StartUpMessage a ) = 
      let m = concatMap (\(x,y) -> [asByteString x, asByteString y] ) a
          j = 9 + foldl (\x y -> x + 1 + strLen y) 0 m
-      in strCat $ [int32 (fromInteger j), int32 protocolVersion] ++ (map hString m) ++ [zero]
+      in strCat $ [int32 j, int32 protocolVersion] ++ (map hString m) ++ [zero]
 putMsg Terminate = strCat [putByte 'X', putWord32be 4]
 putMsg Sync = strCat [putByte 'S', putWord32be 4]
 putMsg Flush = strCat [putByte 'H', putWord32be 4]
@@ -251,7 +251,7 @@ putMsg (Parse nam stmt dts) = strConcat ([
       ++ map (putWord32be . fromIntegral) dts )
     where namb = asByteString nam
           stmtb = asByteString stmt
-          ml = (4* length dts) + 8 + fromInteger (strLen namb + strLen stmtb)
+          ml = (4* length dts) + 8 + (strLen namb + strLen stmtb)
 
 putMsg (Bind nam stmt vals) = strCat ( [
       putByte 'B', putWord32be (fromIntegral ml),
@@ -406,7 +406,7 @@ processResponse rc s (uid,pwd) = do
 reallyRead :: Socket -> Int -> IO ByteString
 reallyRead s len = do
   msg <- sktRecv s len
-  let lm = fromInteger (strLen msg)
+  let lm = strLen msg
   if lm == len then return msg
   else if lm == 0 then error "really read read nothing"
   else do
@@ -431,30 +431,11 @@ hString s = strAppend s zero
 int32 :: Int -> ByteString 
 int32 = putWord32be . fromIntegral 
 
-getWord32be :: Integer -> ByteString -> Int32
-getWord32be n s = (fromIntegral (nth s n) `shiftL` 24) .|.
-              (fromIntegral (nth s (n+1) ) `shiftL` 16) .|.
-              (fromIntegral (nth s (n+2) ) `shiftL`  8) .|.
-              (fromIntegral (nth s (n+3) ))
-
-getWord16be :: Integer -> ByteString -> Int16
-getWord16be n s = (fromIntegral (nth s n) `shiftL` 8) .|.
-              (fromIntegral (nth s (n+1) ))
-
-getInt32 :: Integral a => Integer -> ByteString -> a
+getInt32 :: Integral a => Int -> ByteString -> a
 getInt32 = (fromIntegral .) . getWord32be
 
-getInt16 :: Integral a => Integer -> ByteString -> a
+getInt16 :: Integral a => Int -> ByteString -> a
 getInt16 = (fromIntegral .) . getWord16be
-
-putWord32be :: Int32 -> ByteString
-putWord32be w = pack [(fromIntegral (shiftR w 24) ) ,
-                      (fromIntegral (shiftR w 16) ) ,
-                      (fromIntegral (shiftR w  8) ) ,
-                      (fromIntegral w) ]
-
-putWord16be :: Int16 -> ByteString
-putWord16be w = pack [(fromIntegral (shiftR w 8)), fromIntegral w]
 
 -- | Send a block of bytes on a handle, prepending the complete length.
 sendBlock :: Socket -> PgMessage -> IO ()
@@ -462,7 +443,7 @@ sendBlock h outp = sendAll h (asByteString (putMsg outp))
   where sendAll j msg = do
            n <- sktSend j msg
            if n <= 0 then error "failed to send"
-           else let rm = strDrop (toInteger n) msg in unless (strNull rm) (sendAll j rm)
+           else let rm = strDrop n msg in unless (strNull rm) (sendAll j rm)
 
 --------------------------------------------------------------------------------
 -- Connection
