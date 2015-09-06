@@ -9,8 +9,6 @@ import Diff
 import PostgreSQL
 import Preface.R0ml
 
-import Data.Maybe
-
 	-- LEFT JOIN pg_catalog.pg_class dc ON (d.classoid=dc.oid AND dc.relname='pg_class')
 	-- LEFT JOIN pg_catalog.pg_namespace dn ON (dn.oid=dc.relnamespace AND dn.nspname='pg_catalog')
 viewList :: String

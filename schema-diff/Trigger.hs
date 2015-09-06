@@ -6,9 +6,6 @@ import PostgreSQL
 import Preface.R0ml
 import Util
 import Diff
-import Data.Bits
-import Data.Maybe
-import Debug.Trace
 
 triggerList = [str|
 SELECT n.nspname as "Schema", c.relname AS "Relation", t.tgname AS "Name", tgtype AS "Type", t.tgenabled = 'O' AS enabled,

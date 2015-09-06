@@ -9,7 +9,6 @@ import Diff
 
 import PostgreSQL
 import Preface.R0ml
-import Data.Maybe
 
 tblList :: String
 tblList = [str| 

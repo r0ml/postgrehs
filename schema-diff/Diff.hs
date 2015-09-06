@@ -12,11 +12,7 @@ module Diff (
 
 import Preface.R0ml hiding ((!))
 import Console
--- import Prelude hiding (pi)
 import Data.Array (  (!), listArray)
--- import Data.String (fromString)
-import Data.List as DL (isSuffixOf)
--- import Debug.Trace
 
 data WhichInput = First | Second | Both deriving (Show, Eq)
 
@@ -92,7 +88,7 @@ xchng :: Eq a =>  DiffOperation a -> [DiffOperation a]
 xchng a@(Change ls lc rs rc) =
   let rl = length rc
       ll = length lc
-  in if rc `DL.isSuffixOf` lc then [Deletion ls (take (length lc - rl) lc) rs 
+  in if rc `isSuffixOf` lc then [Deletion ls (take (length lc - rl) lc) rs 
             , Unchanged (ls+ll-rl) (drop (ll - rl) lc) rs rc]
      else [a]
 

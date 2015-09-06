@@ -11,11 +11,9 @@ where
 import PostgreSQL
 import Preface.R0ml
 import Util
-import Data.List (sort, (\\))
--- import Data.List
-import Debug.Trace
-import Text.ParserCombinators.Parsec hiding ((<|>))
 
+-- import Text.ParserCombinators.Parsec hiding ((<|>))
+{-
 dquote = char '"' <?> "double quote"
 quoted_char = do
     _ <- char '\\'
@@ -35,16 +33,31 @@ qsts :: Parser Text
 qsts = do
   r <- many (quoted_string <|> fmap asText ( many1 (noneOf ",")))
   return $ strConcat r
-  
-dlml :: Parser [Text]
-dlml = sepBy qsts (char ',')
+  -}
+
+dlml :: Text -> [Text]
+dlml z = if strNull z then []
+         else if strHead z == '"'
+              then let (p,q) = popStr z
+                    in p : dlml (strTail q)
+              else let zx = strElemIndex ',' z
+                    in case zx of Nothing -> [z]
+                                  Just n -> strTake n z : dlml (strDrop (1+n) z)
+  where popStr x = popSt (strTail x) where
+           popSt :: Text -> (Text, Text)
+           popSt x = if strNull x then (strEmpty, strEmpty)
+                       else let b = strHead x
+                                x2 = strTail x
+                             in case b of 
+                                  '"' -> (strEmpty, x2) 
+                                  '\\' -> let b2 = strHead x2
+                                              x3 = strTail x2
+                                           in let (j,k) = popSt x3 in (strCons b2 j, k)
+                                  _ -> let (j,k) = popSt x2 in (strCons b j, k)
+
 
 glx :: Text -> [Text]
-glx x =
-  let z = parse dlml "" ((tail . init) (asString x))
-  in case z of 
-     Right y -> y
-     Left y -> error (show y)
+glx x = dlml $ (strTail . strInit) x
   
 instance PgValue [Acl] where
   fromPg = maybe [] (cvtacl . asText)

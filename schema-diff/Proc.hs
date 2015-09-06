@@ -9,7 +9,6 @@ import Util
 import Diff
 
 import qualified Data.ByteString as B
-import Data.Maybe
 
 functionList :: String
 functionList = [str|
