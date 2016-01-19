@@ -3,7 +3,7 @@
 module Trigger where
 
 import PostgreSQL
-import Preface.R0ml
+import Preface
 import Util
 import Diff
 

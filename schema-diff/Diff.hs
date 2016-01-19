@@ -10,7 +10,7 @@ module Diff (
   diff
 ) where
 
-import Preface.R0ml hiding ((!))
+import Preface hiding ((!))
 import Console
 import Data.Array (  (!), listArray)
 

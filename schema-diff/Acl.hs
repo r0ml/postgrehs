@@ -9,7 +9,7 @@ module Acl (
 where
 
 import PostgreSQL
-import Preface.R0ml
+import Preface
 import Util
 
 -- import Text.ParserCombinators.Parsec hiding ((<|>))

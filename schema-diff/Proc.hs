@@ -3,7 +3,7 @@
 module Proc where
 
 import PostgreSQL
-import Preface.R0ml
+import Preface
 import Acl
 import Util
 import Diff

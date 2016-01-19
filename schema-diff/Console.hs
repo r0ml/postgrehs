@@ -2,7 +2,7 @@
 
 module Console where
 
-import Preface.R0ml
+import Preface
 
 csi :: Show a => [a] -> ByteString -> ByteString
 csi args code = strConcat ["\ESC[" ,  intercalate ";" (map (asByteString . show) args), code ]

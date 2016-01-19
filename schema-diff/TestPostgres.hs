@@ -1,7 +1,7 @@
 {-# LANGUAGE QuasiQuotes, OverloadedStrings #-}
 
 import PostgreSQL
-import Preface.R0ml
+import Preface
 
 main = do
     (cs : _) <- getArgs

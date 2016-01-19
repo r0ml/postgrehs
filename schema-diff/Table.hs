@@ -8,7 +8,7 @@ import Util
 import Diff
 
 import PostgreSQL
-import Preface.R0ml
+import Preface
 
 tblList :: String
 tblList = [str| 

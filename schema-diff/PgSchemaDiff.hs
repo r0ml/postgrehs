@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances, QuasiQuotes, OverloadedStrings #-}
 
 import PostgreSQL
-import Preface.R0ml
+import Preface
 
 -- import Acl
 import Proc

@@ -9,7 +9,7 @@ module Util (
 where
 
 import PostgreSQL
-import Preface.R0ml
+import Preface
 import Console
 
 gs :: PgResult -> Text

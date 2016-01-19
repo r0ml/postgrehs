@@ -7,7 +7,7 @@ module PostgreSQL (connectToDb, disconnect, sendQuery, doQuery, getNextResult,
                   )
 where
 
-import Preface.R0ml hiding(try)
+import Preface hiding(try)
 
 -- | this has the connectivity channels and the result from the connection attempt (so one can tell if
 --        reconnection is required)
@@ -96,7 +96,7 @@ quoted_string t = let Just z = strElemIndex '"' (strDrop 1 t)
 tpl :: Text -> [Text]
 tpl t = let t1 = strTail t -- first char is '(' or ','
             (t2,t3) = if strHead t1 == '"' then quoted_string t1
-                      else strBreak (\x -> x ==',' || x == ')') t1
+                      else strBrk (\x -> x ==',' || x == ')') t1
          in if strNull t1 || strHead t1 == ')' then [] else t2 : tpl t3
 
 -- need to handle quoted strings (from Acl.hs)
@@ -180,7 +180,7 @@ getMsg 'R' s = let au = getInt32 0 s
                      5 -> let md = strTake 4 (strDrop 4 s) in Authentication 5 md
                      _ -> Authentication au zilde
 getMsg 'S' s = let a = strTake (strLen s - 1) s  
-                   [p,q] = splitStr "\000" a
+                   [p,q] = strSplitStr ("\000" :: String) a
                 in ParameterStatus (asText p) (asText q)
 
 getMsg 'K' s = BackendKey (getInt32 0 s) (getInt32 4 s)
@@ -557,9 +557,9 @@ connectTo ci@(PgConnInfo _ _host _port _db _uid _pwd) = do
 --------------------------------------------------------------------------------
 -- Connection String
 kvpairs :: Text -> [(Text,Text)]
-kvpairs t = let t1 = stripStart t
-                (n,r) = strBreak isSpace t1
-                (k,v) = strBreak (\x -> x == '=' || x == ':') n
+kvpairs t = let t1 = trimL t
+                (n,r) = strBrk isSpace t1
+                (k,v) = strBrk (\x -> x == '=' || x == ':') n
              in if strNull t1 then [] else (asText k, asText (strDrop 1 v)) : kvpairs r
 
 dlml :: Text -> [Text]
@@ -579,25 +579,25 @@ xtail x = if strNull x then x else strTail x
 
 parsePgpassLine :: Text -> (Text,Int,Text,Text,Text)
 parsePgpassLine a =
-  let (h,z) = strBreak (==':') a
-      (p,y) = strBreak (==':') (xtail z)
+  let (h,z) = strBrk (==':') a
+      (p,y) = strBrk (==':') (xtail z)
       nm = (reads (asString p) :: [(Int, String)])
       p2 = if null nm then 0 else (fst . head) nm
-      (d,x) = strBreak (==':') (xtail y)
-      (u,v) = strBreak (==':') (xtail x)
-      (pw,_zz) = strBreak (==':') (xtail v)
+      (d,x) = strBrk (==':') (xtail y)
+      (u,v) = strBrk (==':') (xtail x)
+      (pw,_zz) = strBrk (==':') (xtail v)
    in (h,p2,d,u,pw)
 
 
 valine :: Text -> Bool
-valine a = let z = stripStart a
+valine a = let z = trimL a
             in not (strNull z) && (strHead z /= '#')
 
 passwordFromPgpass :: Text -> Int -> Text -> Text -> IO (Maybe Text)
 passwordFromPgpass h p dn uid = do
     hm <- getHomeDirectory
     a <- strReadFile (hm </> ".pgpass")
-    let b = map parsePgpassLine (filter valine (splitStr ("\n" :: Text) a))
+    let b = map parsePgpassLine (filter valine (strSplitStr ("\n" :: Text) a))
     let c = filter (pgmatch h p dn uid) b
     return (if null c then Nothing else let (_,_,_,_,r) = head c in Just r)
   where pgmatch k w dx u (k',w',dx',u',_) = k' == k && w' == w && ( dx' == "*" || dx' == dx ) && u' == u

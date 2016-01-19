@@ -7,7 +7,7 @@ Synopsis:       Support for Postgres database (driver and utilities)
 Build-Type:     Simple
 
 Library
-  Build-Depends:  preface-r0ml
+  Build-Depends:  preface
   Ghc-options:    -Wall
   Hs-Source-Dirs: .
   Default-Language: Haskell2010
@@ -20,11 +20,11 @@ Executable hspg
   Ghc-options: -Wall
   Default-language:   Haskell2010
   Default-Extensions: NoImplicitPrelude
-  Build-depends:      preface-r0ml, bytestring, network
+  Build-depends:      preface, bytestring, network
 --          , parsec
 
 Executable pg_schema_diff
-  Build-Depends:  template-haskell, postgrehs, preface-r0ml, array, bytestring, text
+  Build-Depends:  template-haskell, postgrehs, preface, array, bytestring, text
 --          , parsec
   Main-Is:        PgSchemaDiff.hs
   Ghc-options:    -Wall 
@@ -33,7 +33,7 @@ Executable pg_schema_diff
   Default-Extensions: NoImplicitPrelude
 
 Executable test_postgres
-  Build-Depends:  template-haskell, array, bytestring, text, postgrehs, preface-r0ml
+  Build-Depends:  template-haskell, array, bytestring, text, postgrehs, preface
 --          , parsec
   Main-Is:        TestPostgres.hs
   Ghc-options:    -Wall 
