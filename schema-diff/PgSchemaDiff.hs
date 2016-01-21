@@ -11,7 +11,7 @@ import Table
 -- import UDT
 import Trigger
 
-schemaList = [str|
+schemaList = [qqstr|
 SELECT n.nspname AS "Name"
  -- ,pg_catalog.pg_get_userbyid(n.nspowner) AS "Owner"
 FROM pg_catalog.pg_namespace n
@@ -60,7 +60,7 @@ main = do
      -- "xfer" -> initialize ag >>= xferData >>= mapM print
      "tables" -> initialize ag >>= compareTables >>= mapM_ print
      -- "types" -> initialize ag >>= compareTypes >>= mapM print
-     _ -> mapM_ putStr [ [str|
+     _ -> mapM_ putStr [ [qqstr|
 The valid comparisons are: procs, views, triggers, tables, types
 
 The arguments are:

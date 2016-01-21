@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, FlexibleInstances, OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes, FlexibleInstances #-}
 
 module Proc where
 
@@ -6,12 +6,9 @@ import PostgreSQL
 import Preface
 import Acl
 import Util
-import Diff
-
-import qualified Data.ByteString as B
 
 functionList :: String
-functionList = [str|
+functionList = [qqstr|
 SELECT n.nspname as "Schema",
   p.proname as "Name",
   pg_catalog.pg_get_function_arguments(p.oid) as "Argument data types",
@@ -50,7 +47,7 @@ mkdbp (s : n : a : r : p : src : acl : _ ) = DbProc {
 -- mkdbp (a:b:c:d:e:f:g:_) = DbProc a b c d e f (cvtacl g)
 
 showProc :: DbProc -> String
-showProc x = asString (strConcat [schema x, ".", name x, "(", argTypes x, ")" ])
+showProc x = asString (strConcat [schema x, asText ".", name x, asText "(", argTypes x, asText ")" ])
 
 instance Show (Comparison DbProc) where
   show (Equal x) = concat [asString sok, showProc x,  asString treset]
@@ -60,7 +57,7 @@ instance Show (Comparison DbProc) where
        if (resType a /= resType b) then concat [asString $ setAttr bold,"\n  resultTypes: ", asString treset, asString $ resType a, asString neq , asString $ resType b] else "",
        -- if (acl a /= acl b) then concat[ setAttr bold, "\n  acls: " , treset, intercalate ", " $ acl a, neq,  intercalate ", " $ acl b] else "",
        if (compareIgnoringWhiteSpace (source a) (source b)) then ""
-          else concat [asString $ setAttr bold,"\n  source differences: \n", asString treset, concatMap show $ diff (splitStr "\n" $ source a) (splitStr "\n" $  source b)]
+          else concat [asString $ setAttr bold,"\n  source differences: \n", asString treset, concatMap show $ diff (strSplitStr (asText "\n") (source a)) (strSplitStr (asText "\n") ( source b)) ]
        ]
 
 instance Comparable DbProc where

@@ -80,8 +80,8 @@ privName x = case x of { ('a') -> "INSERT"; ('r') -> "SELECT"; ('w')->"UPDATE"; 
                         ; ('U') -> "USAGE"; ('C') -> "CREATE"; ('T')->"CREATE TEMP"; ('c')->"CONNECT"; _ ->"? "++[x] }
 
 toAcl :: Text -> Acl
-toAcl x = let  (p,q) = (strBreak ('/'==) x)
-               (a,b) = (strBreak ('='==) p)
+toAcl x = let  (p,q) = (strBrk ('/'==) x)
+               (a,b) = (strBrk ('='==) p)
           in Acl (if (strNull a) then "public" else if (strHead a == '"') then (read (asString a) :: Text) else asText a ) (asString (strTail b)) (strTail q)
 
 instance Ord Acl where

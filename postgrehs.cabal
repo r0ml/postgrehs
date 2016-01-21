@@ -20,12 +20,10 @@ Executable hspg
   Ghc-options: -Wall
   Default-language:   Haskell2010
   Default-Extensions: NoImplicitPrelude
-  Build-depends:      preface, bytestring, network
---          , parsec
+  Build-depends:      preface, postgrehs
 
 Executable pg_schema_diff
-  Build-Depends:  template-haskell, postgrehs, preface, array, bytestring, text
---          , parsec
+  Build-Depends:  postgrehs, preface
   Main-Is:        PgSchemaDiff.hs
   Ghc-options:    -Wall 
   Hs-Source-Dirs: schema-diff .
@@ -33,8 +31,7 @@ Executable pg_schema_diff
   Default-Extensions: NoImplicitPrelude
 
 Executable test_postgres
-  Build-Depends:  template-haskell, array, bytestring, text, postgrehs, preface
---          , parsec
+  Build-Depends:  postgrehs, preface
   Main-Is:        TestPostgres.hs
   Ghc-options:    -Wall 
   Hs-Source-Dirs: schema-diff .

@@ -2,7 +2,6 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Util (
-  module Console,
   module Util,
 )
 
@@ -10,7 +9,6 @@ where
 
 import PostgreSQL
 import Preface
-import Console
 
 gs :: PgResult -> Text
 gs = undefined
@@ -42,14 +40,14 @@ nok :: ByteString
 nok = strConcat [setColor dullRed, setAttr bold, stringleton (asByte charNotEquals), " "]
 
 compareIgnoringWhiteSpace :: Text -> Text -> Bool
-compareIgnoringWhiteSpace x y = ciws (stripStart x) (stripStart y)
+compareIgnoringWhiteSpace x y = ciws (trimL x) (trimL y)
   where ciws x y =
           let a = strHead x
               b = strHead y
               p = strTail x
               q = strTail y
-           in if (strNull (stripStart x) && strNull (stripStart y)) then True else
-              if (isSpace a && isSpace b) then ciws (stripStart p) (stripStart q) else
+           in if (strNull (trimL x) && strNull (trimL y)) then True else
+              if (isSpace a && isSpace b) then ciws (trimL p) (trimL q) else
               if (a == b) then ciws p q else False
 
 count x a = foldl (flip ((+) . fromEnum . x)) 0 a

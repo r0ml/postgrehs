@@ -4,7 +4,6 @@ module View where
 
 import Acl
 import Util
-import Diff
 
 import PostgreSQL
 import Preface
@@ -12,7 +11,7 @@ import Preface
 	-- LEFT JOIN pg_catalog.pg_class dc ON (d.classoid=dc.oid AND dc.relname='pg_class')
 	-- LEFT JOIN pg_catalog.pg_namespace dn ON (dn.oid=dc.relnamespace AND dn.nspname='pg_catalog')
 viewList :: String
-viewList = [str| 
+viewList = [qqstr| 
 SELECT n.nspname AS "Schema", c.relname AS "Name", -- d.description AS "Comment",
   pg_get_viewdef(c.oid) AS definition,
   relacl AS "ACLs"
@@ -26,7 +25,7 @@ WHERE n.nspname IN (select * from unnest(current_schemas(false)))
 ORDER BY 1, 2
 |]
 
-viewColumns = [str|
+viewColumns = [qqstr|
 SELECT n.nspname as "Schema",c.relname AS "View",a.attname AS "Column",a.atttypid AS "Type",
   a.attnotnull OR (t.typtype = 'd' AND t.typnotnull) AS attnotnull,
   a.atttypmod,a.attlen,row_number() OVER (PARTITION BY a.attrelid ORDER BY a.attnum) AS attnum,
@@ -45,7 +44,7 @@ WHERE a.attnum > 0 AND NOT a.attisdropped
 ORDER BY 1,2,3
 |]
 
-viewTriggers = [str|
+viewTriggers = [qqstr|
 SELECT n.nspname as "Schema", c.relname AS "View", t.tgname AS "Name", t.tgenabled = 'O' AS enabled,
   -- pg_get_triggerdef(trig.oid) as source
   concat (np.nspname, '.', p.proname) AS procedure
@@ -58,7 +57,7 @@ WHERE t.tgconstraint = 0  AND n.nspname IN (select * from unnest(current_schemas
 ORDER BY 1,2,3
 |]
 
-viewRules = [str|
+viewRules = [qqstr|
 SELECT n.nspname as "Schema", c.relname AS "View", r.rulename AS "Name", pg_get_ruledef(r.oid) AS definition
 FROM pg_rewrite r
 JOIN pg_class c ON c.oid = r.ev_class

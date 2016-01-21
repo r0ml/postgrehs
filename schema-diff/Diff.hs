@@ -10,9 +10,7 @@ module Diff (
   diff
 ) where
 
-import Preface hiding ((!))
-import Console
-import Data.Array (  (!), listArray)
+import Preface 
 
 data WhichInput = First | Second | Both deriving (Show, Eq)
 

@@ -10,7 +10,7 @@ main = do
 
     let get1 x = doQuery conn (Query x)
 
-    let schemaList = [str|
+    let schemaList = [qqstr|
 SELECT n.nspname AS "Name"
 -- ,pg_catalog.pg_get_userbyid(n.nspowner) AS "Owner"
 FROM pg_catalog.pg_namespace n

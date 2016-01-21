@@ -5,9 +5,8 @@ module Trigger where
 import PostgreSQL
 import Preface
 import Util
-import Diff
 
-triggerList = [str|
+triggerList = [qqstr|
 SELECT n.nspname as "Schema", c.relname AS "Relation", t.tgname AS "Name", tgtype AS "Type", t.tgenabled = 'O' AS enabled,
   concat (np.nspname, '.', p.proname) AS procedure,
   pg_get_triggerdef(t.oid) as definition
