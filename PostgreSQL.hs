@@ -24,6 +24,7 @@ data PgResult =
         ResultSet (Maybe RowDescriptionT) [DataRowT] Text
       | ErrorMessage [(Char, Text)]
       | EndSession
+      | EndQuery
       | OtherResult [PgMessage]
     deriving (Show)
 
@@ -84,7 +85,7 @@ instance PgValue Bool where
 
 instance PgValue a => PgValue [a] where
   fromPg (Just x) = map (fromPg . Just . asByteString) (tpl (asText x)) 
-  fromPg Nothing = undefined 
+  fromPg Nothing = trace "fromPg Nothing" undefined 
 
 quoted_string :: Text -> (Text, Text)
 quoted_string t = let Just z = strElemIndex '"' (strDrop 1 t)
@@ -208,9 +209,9 @@ getMsg 'A' s = let prc = getInt32 0 s
                    (ns, chan) = getUntil0 (ByteStream s 4)
                    (ns2, pay) = getUntil0 ns2
                 in Notification prc (asText chan) (asText pay)
-getMsg 't' _s = undefined -- ParameterDescription 
+getMsg 't' _s = trace "getMsg 't'" undefined -- ParameterDescription 
 getMsg 'X' _s = Terminate -- never really sent by the backend, but pseudo-sent when the socket is closed
-getMsg _ _ = undefined
+getMsg _a _b = traceShow ("getMsg ",_a,_b) undefined
 
 putMsg :: PgMessage -> ByteString
 putMsg (Query s) = strCat [ putByte 'Q', putStringMessage s]
@@ -343,8 +344,10 @@ unfoldWhile m = xloop
 -}
 
 doQuery :: Postgres -> PgQuery -> IO PgResult
-doQuery pg s = do { PostgresR (PostgresX z x _) _ _ _ <- reconnect pg;  writeChan z s >> readChan x }
-
+doQuery pg s = do { PostgresR (PostgresX z x _) _ _ _ <- reconnect pg;  writeChan z s >> 
+                    head <$> (collectUntil isEndQuery (readChan x)) }
+    where isEndQuery EndQuery = True
+          isEndQuery _ = False
 getNextResult :: Postgres -> IO PgResult
 getNextResult pg = do { PostgresR (PostgresX _ x _) _ _ _ <- reconnect pg; readChan x }
 
@@ -547,7 +550,7 @@ connectTo ci@(PgConnInfo _ _host _port _db _uid _pwd) = do
                                             in return $ ResultSet z (reverse daccum) s
                       ErrorResponse r -> return $ ErrorMessage r
                       ReadyForQuery _z -> if (not . null) saccum then return $ OtherResult (reverse saccum)
-                                                                 else return $ OtherResult (reverse saccum) -- getResults x g
+                                                                 else return $ EndQuery 
                       -- do
 --                        (bs, cc) <- unfoldWhile (getDataRow x)
 --                        let cx = case cc of { CommandComplete z -> z; _ -> show cc }
